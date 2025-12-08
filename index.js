@@ -1286,26 +1286,74 @@ client.on('interactionCreate', async interaction => {
                     ctx.stroke();
                 }
             } else if (stil === 'artist') {
-                // Künstlerische Pinselstriche
-                ctx.strokeStyle = '#ffffff33';
-                for (let i = 0; i < 5; i++) {
+                // Artistischer Stil: Farbklekse
+                for (let i = 0; i < 40; i++) {
+                    ctx.fillStyle = `rgba(${Math.floor(Math.random()*255)}, ${Math.floor(Math.random()*255)}, ${Math.floor(Math.random()*255)}, 0.15)`;
                     ctx.beginPath();
-                    ctx.arc(Math.random() * 800, Math.random() * 800, 100, 0, Math.PI * 2);
-                    ctx.stroke();
+                    ctx.arc(Math.random() * 800, Math.random() * 800, Math.random() * 120 + 20, 0, Math.PI * 2);
+                    ctx.fill();
                 }
             } else if (stil === 'cyber') {
-                // Cyber-Grid
-                ctx.strokeStyle = '#00ffff33';
-                for (let i = 0; i < 800; i += 50) {
+                // Cyber-Stil: Raster
+                ctx.strokeStyle = '#ffffff22';
+                for (let x = 0; x < 800; x += 20) {
                     ctx.beginPath();
-                    ctx.moveTo(i, 0);
-                    ctx.lineTo(i, 800);
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, 800);
                     ctx.stroke();
-                    ctx.moveTo(0, i);
-                    ctx.lineTo(800, i);
+                }
+                for (let y = 0; y < 800; y += 20) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(800, y);
                     ctx.stroke();
                 }
             }
+
+                const frames = [
+                    '⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'
+                ];
+
+                const steps = [
+                    { text: 'Verbindung zum Ziel herstellen', pct: 5 },
+                    { text: 'Firewall analysieren', pct: 18 },
+                    { text: 'Ports scannen', pct: 31 },
+                    { text: 'Exploit vorbereiten', pct: 45 },
+                    { text: 'Payload übertragen', pct: 58 },
+                    { text: 'Sitzung etablieren', pct: 72 },
+                    { text: 'Credentials extrahieren', pct: 86 },
+                    { text: 'Abschlussarbeiten', pct: 96 }
+                ];
+
+                // animate through steps with spinner and progress bar
+                for (let i = 0; i < steps.length; i++) {
+                    const s = steps[i];
+                    const blocks = Math.floor((s.pct / 100) * 20);
+                    const bar = '█'.repeat(blocks) + '░'.repeat(20 - blocks);
+                    // show a short spinner animation between edits
+                    for (let f = 0; f < 3; f++) {
+                        const frame = frames[(i + f) % frames.length];
+                        const content = `${frame} 🔒 Hacking ${user.tag} — ${s.text}\n[${bar}] ${s.pct}%`;
+                        try { await interaction.editReply({ content }); } catch (_) {}
+                        await sleep(220 + Math.floor(Math.random() * 180));
+                    }
+                }
+
+                // final reveal with embed-like block
+                const fakePasswords = ['1234', 'password', 'qwerty', 'letmein', 'P@ssw0rd', 'hunter2', 'iloveyou', 'dragon', 'sunshine'];
+                const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
+                const final = {
+                    content: `✅ Zugriff erlangt auf ${user.tag} — Ergebnis:`,
+                };
+                try { await interaction.editReply(final); } catch (_) {}
+                // small dramatic pause
+                await sleep(600);
+                try {
+                    await interaction.followUp({ content: '🔑 Gefundenes Passwort: `' + found + '` (Nur Spaß! 🔒)', flags: MessageFlags.Ephemeral });
+                } catch (e) {
+                    try { await interaction.channel.send({ content: `🔑 Gefundenes Passwort: ${found} (Nur Spaß!)` }); } catch(_){ }
+                }
+                return;
 
             // Name hinzufügen
             ctx.font = '60px sans-serif';
