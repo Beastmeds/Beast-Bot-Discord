@@ -648,10 +648,10 @@ async function niceEdit(interaction, payload) {
 
 // Small local DB of programming concepts (German) for quick offline answers
 const localConceptDB = {
-    'recursion': `Recursion ist, wenn sich eine Funktion selbst aufruft. Beispiel (Python):\n\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```\n\nDas ist nützlich für Probleme, die sich in kleinere, ähnliche Teilprobleme zerlegen lassen.`,
-    'closure': `Ein Closure ist eine Funktion, die auf Variablen aus ihrer äußeren Umgebung zugreifen kann, auch nachdem diese Umgebung verlassen wurde. Beispiel (JavaScript):\n\n```javascript\nfunction makeAdder(x) {\n  return function(y) {\n    return x + y;\n  }\n}\nconst add5 = makeAdder(5);\nconsole.log(add5(2)); // 7\n````,
-    'async': `"async" beschreibt asynchrone Programmierung: Operationen laufen nebenbei (z.B. Netzwerk), ohne den Haupt-Thread zu blockieren. In JavaScript nutzt man async/await:\n\n```javascript\nasync function fetchData() {\n  const r = await fetch('https://example.com');\n  return await r.json();\n}\n```\n`,
-    'oop': `OOP (Objektorientierte Programmierung) organisiert Code in Klassen/Objekte mit Eigenschaften (Attributes) und Verhalten (Methoden). Beispiel (Python):\n\n```python\nclass Dog:\n    def __init__(self, name):\n        self.name = name\n    def bark(self):\n        print('Wuff, ich bin', self.name)\n```\n`,
+    'recursion': 'Recursion ist, wenn sich eine Funktion selbst aufruft. Beispiel (Python):\n\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```\n\nDas ist nützlich für Probleme, die sich in kleinere, ähnliche Teilprobleme zerlegen lassen.',
+    'closure': 'Ein Closure ist eine Funktion, die auf Variablen aus ihrer äußeren Umgebung zugreifen kann, auch nachdem diese Umgebung verlassen wurde. Beispiel (JavaScript):\n\n```javascript\nfunction makeAdder(x) {\n  return function(y) {\n    return x + y;\n  }\n}\nconst add5 = makeAdder(5);\nconsole.log(add5(2)); // 7\n```',
+    'async': '"async" beschreibt asynchrone Programmierung: Operationen laufen nebenbei (z.B. Netzwerk), ohne den Haupt-Thread zu blockieren. In JavaScript nutzt man async/await:\n\n```javascript\nasync function fetchData() {\n  const r = await fetch(\'https://example.com\');\n  return await r.json();\n}\n```\n',
+    'oop': 'OOP (Objektorientierte Programmierung) organisiert Code in Klassen/Objekte mit Eigenschaften (Attributes) und Verhalten (Methoden). Beispiel (Python):\n\n```python\nclass Dog:\n    def __init__(self, name):\n        self.name = name\n    def bark(self):\n        print(\'Wuff, ich bin\', self.name)\n```\n',
 };
 
 // Message-based helper commands (configurable prefix)
@@ -819,7 +819,7 @@ client.on('messageCreate', async (message) => {
             if (!entGuild && !(message.member && message.member.permissions && message.member.permissions.has && message.member.permissions.has(PermissionFlagsBits.ManageGuild)) && !isOwner) return message.reply('Entertainment-Commands sind für diesen Server deaktiviert.');
 
             const cd = isOnCooldown(message.guild?.id, message.author.id, cmd, 10);
-            if (cd > 0) return message.reply(`Cooldown für \\`${cmd}\\`: noch ${cd}s`);
+            if (cd > 0) return message.reply(`Cooldown für \`${cmd}\`: noch ${cd}s`);
 
             // handle each message command locally (simplified versions)
             if (cmd === 'exploit') {
@@ -1954,7 +1954,7 @@ client.on('interactionCreate', async interaction => {
 
         const fakePasswords = ['1234', 'password', 'qwerty', 'letmein', 'P@ssw0rd', 'hunter2', 'iloveyou'];
         const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
-        await interaction.followUp({ content: `✅ Erfolgreich! Gefundenes Passwort: \\`${found}\\` (Nur Spaß! 🔒)`, flags: MessageFlags.Ephemeral });
+        await interaction.followUp({ content: `✅ Erfolgreich! Gefundenes Passwort: \`${found}\` (Nur Spaß! 🔒)`, flags: MessageFlags.Ephemeral });
         return;
     }
 
