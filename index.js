@@ -278,6 +278,51 @@ const commands = [
         options: [ { name: 'user', description: 'User to hack', type: 6, required: true } ]
     },
     {
+        name: 'bruteforce',
+        description: 'Simulierter Bruteforce gegen ein Passwort (nur Simulation)',
+        options: [ { name: 'password', description: 'Passwort das "gefunden" werden soll', type: 3, required: true } ]
+    },
+    {
+        name: 'phish',
+        description: 'Generiert eine simulierte Phishing-Mail (Training, harmlos)',
+        options: [ { name: 'target', description: 'Ziel/Quelle (z.B. Bank, Mitarbeiter)', type: 3, required: true } ]
+    },
+    {
+        name: 'virus',
+        description: 'Simulierter Spaß-Virus: harmlose Nachrichten/Emojis (begrenzte Anzahl)',
+        options: [ { name: 'type', description: 'Art des Spaß-Virus (z.B. trojan)', type: 3, required: false } ]
+    },
+    {
+        name: 'scan',
+        description: 'Scant den Server auf einfache Statistiken/Schwächen',
+        options: []
+    },
+    {
+        name: 'decrypt',
+        description: 'Versucht einfache Entschlüsselungen (Base64/Hex/ROT13)',
+        options: [ { name: 'code', description: 'Zu entschlüsselnder Text', type: 3, required: true } ]
+    },
+    {
+        name: 'set-prefix',
+        description: 'Setzt das Nachrichten-Präfix für diesen Server (Admin)',
+        options: [ { name: 'prefix', description: 'Neues Präfix (z.B. !)', type: 3, required: true }, { name: 'global', description: 'Als global speichern (nur Bot-Owner)', type: 5, required: false } ]
+    },
+    {
+        name: 'set-entertainment',
+        description: 'Aktiviere/Deaktiviere Entertainment-Commands in dieser Gilde (Admin)',
+        options: [ { name: 'value', description: 'true oder false', type: 3, required: true }, { name: 'global', description: 'Als global speichern (nur Bot-Owner)', type: 5, required: false } ]
+    },
+    {
+        name: 'exploit',
+        description: 'Gibt gefälschte Exploits/Vorschläge für gängige Bugs (nur zu Trainingszwecken)',
+        options: [ { name: 'bug', description: 'Bug oder Exploit-Thema (z.B. ping-spam)', type: 3, required: true } ]
+    },
+    {
+        name: 'bitcoin',
+        description: 'Simuliert Krypto-Mining / Wallet-Ergebnis (nur Spiel/Unterhaltung)',
+        options: [ { name: 'amount', description: 'Menge (ganzzahlig)', type: 4, required: true } ]
+    },
+    {
         name: 'imagine',
         description: 'Erstellt ein Bild aus einem Prompt (benötigt OpenAI API-Key)',
         options: [ { name: 'prompt', description: 'Beschreibung des Bildes', type: 3, required: true } ]
@@ -556,6 +601,17 @@ async function saveConfig(cfg) {
     }
 }
 
+// Simple in-memory cooldown map: key -> timestamp when allowed next
+const cooldowns = new Map();
+function isOnCooldown(guildId, userId, cmd, seconds) {
+    const key = `${guildId || 'dm'}:${userId}:${cmd}`;
+    const next = cooldowns.get(key) || 0;
+    const now = Date.now();
+    if (now < next) return Math.ceil((next - now) / 1000);
+    cooldowns.set(key, now + (seconds * 1000));
+    return 0;
+}
+
 // Helper to send nicer replies with emoji prefix. Accepts string or reply object (embeds/files).
 async function niceReply(interaction, payload) {
     try {
@@ -590,6 +646,239 @@ async function niceEdit(interaction, payload) {
     }
 }
 
+// Small local DB of programming concepts (German) for quick offline answers
+const localConceptDB = {
+    'recursion': `Recursion ist, wenn sich eine Funktion selbst aufruft. Beispiel (Python):\n\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```\n\nDas ist nützlich für Probleme, die sich in kleinere, ähnliche Teilprobleme zerlegen lassen.`,
+    'closure': `Ein Closure ist eine Funktion, die auf Variablen aus ihrer äußeren Umgebung zugreifen kann, auch nachdem diese Umgebung verlassen wurde. Beispiel (JavaScript):\n\n```javascript\nfunction makeAdder(x) {\n  return function(y) {\n    return x + y;\n  }\n}\nconst add5 = makeAdder(5);\nconsole.log(add5(2)); // 7\n````,
+    'async': `"async" beschreibt asynchrone Programmierung: Operationen laufen nebenbei (z.B. Netzwerk), ohne den Haupt-Thread zu blockieren. In JavaScript nutzt man async/await:\n\n```javascript\nasync function fetchData() {\n  const r = await fetch('https://example.com');\n  return await r.json();\n}\n```\n`,
+    'oop': `OOP (Objektorientierte Programmierung) organisiert Code in Klassen/Objekte mit Eigenschaften (Attributes) und Verhalten (Methoden). Beispiel (Python):\n\n```python\nclass Dog:\n    def __init__(self, name):\n        self.name = name\n    def bark(self):\n        print('Wuff, ich bin', self.name)\n```\n`,
+};
+
+// Message-based helper commands (configurable prefix)
+client.on('messageCreate', async (message) => {
+    try {
+        if (!message || message.author?.bot) return;
+        const txt = (message.content || '').trim();
+        const cfg = await loadConfig();
+        const gcfg = (message.guild && cfg[message.guild.id]) ? cfg[message.guild.id] : {};
+        const prefix = (gcfg && gcfg.prefix) || (cfg._global && cfg._global.prefix) || '!';
+        if (!txt.startsWith(prefix)) return;
+
+        // !explain <concept>
+        const m = txt.match(new RegExp('^' + prefix.replace(/[-\/\\^$*+?.()|[\]{}]/g,'\\$&') + 'explain\\s+(.+)$','i'));
+        if (m) {
+            const conceptRaw = m[1].trim();
+            if (!conceptRaw) return message.reply('Bitte gib ein Konzept an. Beispiel: `!explain recursion`');
+            const key = conceptRaw.toLowerCase();
+
+            // quick local DB lookup
+            if (localConceptDB[key]) {
+                return message.reply(localConceptDB[key]);
+            }
+
+            // fallback: try OpenAI if API key configured (global or per-guild)
+            try {
+                const cfg = await loadConfig();
+                const gcfg = (message.guild && cfg[message.guild.id]) ? cfg[message.guild.id] : {};
+                const openaiKey = process.env.OPENAI_API_KEY || gcfg.openaiKey || (cfg._global && cfg._global.openaiKey);
+                if (!openaiKey) {
+                    return message.reply(`Kein lokaler Eintrag gefunden für "${conceptRaw}" und kein OpenAI-Key konfiguriert. Versuche einen einfacheren Begriff oder setze einen OpenAI-Key.`);
+                }
+
+                // Ask OpenAI for a short German explanation with a small code example
+                const prompt = `Erkläre kurz und einfach auf Deutsch das Programmierkonzept "${conceptRaw}" für Anfänger und gib ein kleines Beispiel in einer verbreiteten Sprache (Python/JS). Halte es kurz (maximal ~6 Zeilen Code).`;
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
+                    body: JSON.stringify({ model: 'gpt-3.5-turbo', messages: [{ role: 'system', content: 'Du erklärst Programmierbegriffe knapp auf Deutsch, mit einem kurzen Beispielcode.' }, { role: 'user', content: prompt }], max_tokens: 400 })
+                });
+                const j = await res.json();
+                if (res.ok && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) {
+                    const reply = j.choices[0].message.content.trim();
+                    return message.reply(reply);
+                } else {
+                    console.warn('OpenAI explain failed', j);
+                    return message.reply(`Konnte keine Erklärung von OpenAI erhalten. (${j.error?.message || 'unknown'})`);
+                }
+            } catch (e) {
+                console.error('explain fallback error', e);
+                return message.reply('Fehler beim Abrufen der Erklärung. Versuch es später nochmal.');
+            }
+        }
+    } catch (e) {
+        console.error('messageCreate !explain handler error', e);
+    }
+});
+
+// Simple, safe handlers for `!run` and `!debug` and message shortcuts
+client.on('messageCreate', async (message) => {
+    try {
+        if (!message || message.author?.bot) return;
+        const txt = (message.content || '').trim();
+        const cfg = await loadConfig();
+        const gcfg = (message.guild && cfg[message.guild.id]) ? cfg[message.guild.id] : {};
+        const prefix = (gcfg && gcfg.prefix) || (cfg._global && cfg._global.prefix) || '!';
+        if (!txt.startsWith(prefix)) return;
+
+        // parse command after prefix
+        const after = txt.slice(prefix.length).trim();
+        const parts = after.split(/\s+/);
+        const cmd = (parts.shift() || '').toLowerCase();
+        const rest = parts.join(' ');
+
+        // !run <expr>  -- VERY limited: only numeric expressions allowed (digits, + - * / ( ) . % and whitespace)
+        const runMatch = cmd === 'run' ? [null, rest] : null;
+        if (runMatch) {
+            const code = runMatch[1].trim();
+            if (!code) return message.reply('Bitte gib einen Ausdruck an, z.B. `!run 2 + 2`');
+
+            // Reject anything with letters or underscores to avoid arbitrary code execution
+            if (/[a-zA-Z_]/.test(code)) {
+                return message.reply('Aus Sicherheitsgründen sind nur einfache numerische Ausdrücke erlaubt (z.B. `!run 2+2*3`). Verwende nur Zahlen und +-*/().');
+            }
+
+            // Allow digits, operators, parentheses, decimal points, whitespace and percent
+            const safeRe = /^[0-9+\-*/().%\s]+$/;
+            if (!safeRe.test(code)) return message.reply('Ungültige Zeichen im Ausdruck. Erlaubt: Zahlen, + - * / ( ) . %');
+
+            // Replace caret ^ with ** for exponent if user used it
+            const expr = code.replace(/\^/g, '**');
+            try {
+                // Evaluate in a strict, minimal Function scope. Input is already validated.
+                const result = Function('"use strict"; return (' + expr + ');')();
+                return message.reply(`Ergebnis: ${result}`);
+            } catch (e) {
+                console.error('!run eval error', e);
+                return message.reply('Fehler bei der Auswertung: ' + (e.message || String(e)));
+            }
+        }
+
+        // !debug <error message>
+        const debugMatch = cmd === 'debug' ? [null, rest] : null;
+        if (debugMatch) {
+            const err = debugMatch[1].trim();
+            if (!err) return message.reply('Bitte füge die Fehlermeldung an: `!debug NameError: name x is not defined`');
+
+            // Simple keyword-based suggestions
+            const suggestions = {
+                'NameError': 'Definiere die Variable zuerst. Beispiel: `x = 5` bevor du `print(x)` benutzt.',
+                'TypeError': 'Überprüfe die Typen. Vielleicht verwendest du eine Funktion mit falschem Typ (z.B. versuche `str(...)` oder `int(...)`).',
+                'IndexError': 'Prüfe, ob der Index innerhalb der Länge der Liste/Sequenz liegt (0 bis len-1).',
+                'KeyError': 'Der Dictionary-Schlüssel existiert nicht. Nutze `dict.get(key)` oder prüfe `if key in dict:`.',
+                'ZeroDivisionError': 'Division durch 0 ist nicht erlaubt. Stelle sicher, dass der Divisor != 0.',
+                'SyntaxError': 'Syntax prüfen: fehlende Klammern, Doppelpunkt oder falsch eingerückter Code.'
+            };
+
+            for (const k of Object.keys(suggestions)) {
+                if (err.includes(k) || err.toLowerCase().includes(k.toLowerCase())) {
+                    return message.reply(`${k} → ${suggestions[k]}`);
+                }
+            }
+
+            // Fallback: use OpenAI if configured
+            try {
+                const cfg = await loadConfig();
+                const gcfg = (message.guild && cfg[message.guild.id]) ? cfg[message.guild.id] : {};
+                const openaiKey = process.env.OPENAI_API_KEY || gcfg.openaiKey || (cfg._global && cfg._global.openaiKey);
+                if (!openaiKey) {
+                    return message.reply('Keine lokale Regel gefunden und kein OpenAI-Key konfiguriert. Konfiguriere einen OpenAI-Key, um detailliertere Vorschläge zu erhalten.');
+                }
+
+                const prompt = `Du bist ein hilfreicher Assistent, der kurze Debug-Tipps auf Deutsch gibt. Nutzer-Fehler: ${err}. Gib eine knappe, konkrete Fehlerursache und einen Fix-Vorschlag (1-2 Sätze).`;
+                const res = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${openaiKey}` },
+                    body: JSON.stringify({ model: 'gpt-3.5-turbo', messages: [{ role: 'user', content: prompt }], max_tokens: 200 })
+                });
+                const j = await res.json();
+                if (res.ok && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) {
+                    return message.reply(j.choices[0].message.content.trim());
+                } else {
+                    console.warn('OpenAI debug failed', j);
+                    return message.reply('Konnte keine Debug-Hilfe von OpenAI erhalten.');
+                }
+            } catch (e) {
+                console.error('!debug fallback error', e);
+                return message.reply('Fehler beim Abrufen der Debug-Hilfe.');
+            }
+        }
+
+        // Message shortcuts for entertainment commands (exploit, bitcoin, phish, virus, hack, bruteforce)
+        const entCmds = ['exploit','bitcoin','phish','virus','hack','bruteforce','scan','decrypt'];
+        if (entCmds.includes(cmd)) {
+            // Check per-guild entertainment toggle and cooldown
+            const owners = new Set();
+            if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+            if (cfg.ownerId) owners.add(cfg.ownerId);
+            if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+            if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+            const isOwner = owners.has(message.author.id);
+            const entGlobal = (cfg._global && typeof cfg._global.entertainmentEnabled !== 'undefined') ? !!cfg._global.entertainmentEnabled : true;
+            const entGuild = (gcfg && typeof gcfg.entertainmentEnabled !== 'undefined') ? !!gcfg.entertainmentEnabled : true;
+            if (!entGlobal && !isOwner) return message.reply('Entertainment-Commands sind global deaktiviert.');
+            if (!entGuild && !(message.member && message.member.permissions && message.member.permissions.has && message.member.permissions.has(PermissionFlagsBits.ManageGuild)) && !isOwner) return message.reply('Entertainment-Commands sind für diesen Server deaktiviert.');
+
+            const cd = isOnCooldown(message.guild?.id, message.author.id, cmd, 10);
+            if (cd > 0) return message.reply(`Cooldown für \\`${cmd}\\`: noch ${cd}s`);
+
+            // handle each message command locally (simplified versions)
+            if (cmd === 'exploit') {
+                const bug = rest || 'unknown';
+                const map = {
+                    'ping-spam': 'Exploit gefunden: /ping everyone (aber blockiert von Bot – gut so!). Level: Noob',
+                    'role-escalation': 'Exploit (gefälscht): Verwende fehlende Role-Checks; Mitigation: Verifiziere Berechtigungen serverseitig. Level: Medium'
+                };
+                const out = map[bug.toLowerCase()] || `Exploit gefunden (simuliert): ${bug} -> Beispiel-Payload: "/${bug} --exploit" (Nur Simulation)`;
+                const warn = '\n\n⚠️ Hinweis: Dies ist eine harmlose Simulation/Aufsummierung. Missbrauch ist illegal.';
+                return message.reply(out + warn);
+            }
+            if (cmd === 'bitcoin') {
+                const amt = parseInt(rest) || 1;
+                if (amt <= 0) return message.reply('Bitte gib eine positive Menge an.');
+                const pricePerBTC = 20000 + Math.random() * 40000;
+                let btc = (Math.random() * 0.01) * amt;
+                const loss = Math.random() < 0.12;
+                if (loss) btc = - (Math.random() * 0.005) * amt;
+                const eur = Math.round(btc * pricePerBTC * 100) / 100;
+                const btcStr = Math.abs(btc).toFixed(6);
+                const resultText = btc < 0 ? `❌ Verlust: -${btcStr} BTC (≈ ${eur} €)` : `✅ Gewinn: ${btcStr} BTC (≈ ${eur} €)`;
+                const extra = btc < 0 ? 'Ouch — Pech gehabt. Denk an sichere Passwörter!' : "Nice! Glück gehabt. Investiere weise.";
+                return message.reply(`⛏️ Simulation: ${resultText}\n${extra}\n(Preisannahme: ~${Math.round(pricePerBTC)} €/BTC)`);
+            }
+            if (cmd === 'phish') {
+                const target = rest || 'Organisation';
+                const subject = `🔔 SIMULATION: Sicherheitswarnung von ${target} — Dringende Aktion erforderlich (TRAINING)`;
+                const fakeLink = 'http://fake-link[dot]example';
+                const body = `📧 Betreff: ${subject}\n\nHallo,\n\nWir haben verdächtige Aktivitäten in Ihrem Konto festgestellt. Bitte bestätigen Sie Ihre Daten sofort unter ${fakeLink} (DIES IST EINE SIMULATION — NICHT KLICKEN).\n\nMit freundlichen Grüßen,\n${target} Sicherheitsteam`;
+                const tips = `**Phishing-Prüfpunkte:**\n- Dringender Tonfall / Drohungen\n- Ungewöhnliche Absenderadresse\n- Aufforderung, persönliche Daten über Links einzugeben\n\n**Hinweis:** Dies ist eine harmlose Trainings-Simulation. Niemals auf unbekannte Links klicken.`;
+                return message.channel.send({ embeds: [{ title: `Simulierte Phishing-Mail (${target})`, description: 'TRAININGSBEISPIEL — KEINE echte Nachricht.', color: 0xFFA500, fields: [{ name: 'Nachricht (simuliert)', value: '```' + body + '```' }, { name: 'Erkennungs-Tipps', value: tips }] }] });
+            }
+            if (cmd === 'virus') {
+                const type = (rest || 'fun').toLowerCase();
+                const msgs = type === 'trojan' ? ['🦠 Trojan aktiviert! Prozesse starten...', '⚠️ Fehlende Datei: payload.dll', '🔁 Selbstreplikation simuliert...'] : ['🧪 Virus-Simulation: Spaßmodus aktiviert!', '💥 Error 404: Brain not found', '🤖 System: Kaffee-Level niedrig'];
+                for (let i=0;i<Math.min(msgs.length,4);i++) { await message.channel.send(msgs[i] + ' (SIMULIERT)'); }
+                return message.channel.send('🛡️ Hinweis: Dies war eine harmlose Simulation zu Trainings-/Unterhaltungszwecken.');
+            }
+            if (cmd === 'hack' || cmd === 'bruteforce') {
+                // admin only
+                if (!message.member || !message.member.permissions || !message.member.permissions.has(PermissionFlagsBits.ManageGuild)) return message.reply('Nur Server-Admins dürfen diesen simulierten Befehl verwenden.');
+                // simple simulated reply
+                return message.reply('Simulation gestartet (siehe Slash-Command für detailliertere Ausgabe).');
+            }
+            if (cmd === 'scan') {
+                // reuse existing scan: call slash via suggestion
+                return message.reply('Bitte nutze `/scan` für vollständigen Server-Scan (Slash-Command).');
+            }
+            if (cmd === 'decrypt') {
+                // simple attempt: echo fallback to slash
+                return message.reply('Bitte nutze `/decrypt` (Slash-Command) für bessere Ausgabe.');
+            }
+        }
+
+    } catch (e) {
+        console.error('messageCreate !run/!debug handler error', e);
+    }
+});
 // Helper: get Twitch app token
 async function getTwitchAppToken(clientId, clientSecret) {
     try {
@@ -1613,6 +1902,349 @@ client.on('interactionCreate', async interaction => {
         try { await interaction.reply({ content: 'Fehler beim Ausführen des Befehls.', flags: MessageFlags.Ephemeral }); } catch (_) {}
     }
 });
+
+// Simulated entertainment commands: /hack and /bruteforce (purely fake, no real hacking)
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.__blocked) return;
+    const cmd = interaction.commandName;
+
+    // Helper sleep
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // Load config + owner/entertainment flags
+    const cfg = await loadConfig();
+    const gcfg = (interaction.guild && cfg[interaction.guild.id]) ? cfg[interaction.guild.id] : {};
+    const owners = new Set();
+    if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+    if (cfg.ownerId) owners.add(cfg.ownerId);
+    if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+    if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+    const isOwner = owners.has(interaction.user.id);
+    const entGlobal = (cfg._global && typeof cfg._global.entertainmentEnabled !== 'undefined') ? !!cfg._global.entertainmentEnabled : true;
+    const entGuild = (gcfg && typeof gcfg.entertainmentEnabled !== 'undefined') ? !!gcfg.entertainmentEnabled : true;
+
+    // global set of entertainment commands for quick check
+    const entCmds = ['hack','bruteforce','phish','virus','exploit','bitcoin'];
+    if (entCmds.includes(cmd)) {
+        if (!entGlobal && !isOwner) return interaction.reply({ content: 'Entertainment-Commands sind global deaktiviert.', flags: MessageFlags.Ephemeral });
+        if (!entGuild && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Entertainment-Commands sind für diesen Server deaktiviert.', flags: MessageFlags.Ephemeral });
+        const cd = isOnCooldown(interaction.guild?.id, interaction.user.id, cmd, 10);
+        if (cd > 0) return interaction.reply({ content: `Bitte warte noch ${cd}s bevor du "/${cmd}" erneut benutzt.`, flags: MessageFlags.Ephemeral });
+    }
+
+    if (cmd === 'hack') {
+        // Only allow admins
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
+        }
+        const user = interaction.options.getUser('user');
+        if (!user) return interaction.reply({ content: 'Bitte gib einen User an.', flags: MessageFlags.Ephemeral });
+
+        await interaction.reply({ content: `🔒 Starte Simulation: Hacking ${user.tag}...`, flags: MessageFlags.Ephemeral });
+
+        const total = 10;
+        for (let i = 1; i <= total; i++) {
+            const pct = Math.floor((i / total) * 100);
+            const blocks = Math.floor((i / total) * 10);
+            const bar = '█'.repeat(blocks) + '░'.repeat(10 - blocks);
+            await interaction.followUp({ content: `🔒 Hacking ${user.tag}... [${bar}] ${pct}%`, flags: MessageFlags.Ephemeral });
+            await sleep(550 + Math.floor(Math.random() * 300));
+        }
+
+        const fakePasswords = ['1234', 'password', 'qwerty', 'letmein', 'P@ssw0rd', 'hunter2', 'iloveyou'];
+        const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
+        await interaction.followUp({ content: `✅ Erfolgreich! Gefundenes Passwort: \\`${found}\\` (Nur Spaß! 🔒)`, flags: MessageFlags.Ephemeral });
+        return;
+    }
+
+    if (cmd === 'bruteforce') {
+        // Only allow admins to run dramatic simulations
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
+        }
+        const target = interaction.options.getString('password');
+        if (!target) return interaction.reply({ content: 'Bitte gib ein Ziel-Passwort an.', flags: MessageFlags.Ephemeral });
+
+        await interaction.reply({ content: `🔐 Starte Bruteforce-Simulation gegen ein Passwort...`, flags: MessageFlags.Ephemeral });
+
+        // Wordlist-ish candidates for drama
+        const words = ['apple','banana','orange','letmein','1234','password','qwerty','admin','welcome','sunshine','dragon','iloveyou'];
+        // Decide at which attempt we'll 'find' the password to ensure predictable runtime
+        const successAt = Math.max(3, Math.floor(Math.random() * 40));
+        let attempt = 0;
+        for (;;) {
+            attempt++;
+            // generate a fake attempt: sometimes a known word, sometimes random
+            let attemptWord = Math.random() < 0.6 ? words[Math.floor(Math.random() * words.length)] : Math.random().toString(36).slice(2, 8);
+            const ok = (attempt === successAt);
+            // periodically update progress (every 5 attempts or on success)
+            if (attempt % 5 === 0 || ok) {
+                const status = ok ? `✅ Versuch ${attempt}: ${target} ✅ – Gefunden!` : `Versuch ${attempt}: ${attemptWord} ❌`;
+                await interaction.followUp({ content: status, flags: MessageFlags.Ephemeral });
+            }
+            if (ok) break;
+            // safety cap
+            if (attempt > 200) {
+                await interaction.followUp({ content: `Abbruch nach ${attempt} Versuchen (Simulation).`, flags: MessageFlags.Ephemeral });
+                break;
+            }
+            await sleep(200 + Math.floor(Math.random() * 300));
+        }
+        // final comedic verdict
+        await interaction.followUp({ content: `🧨 Bruteforce-Simulation abgeschlossen in ${attempt} Versuchen. Tipp: Verwende längere, einzigartige Passwörter!`, flags: MessageFlags.Ephemeral });
+        return;
+    }
+    
+    if (cmd === 'phish') {
+        // Admin-only: create a clearly labeled, educational phishing example
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen Trainingsbefehl verwenden.', flags: MessageFlags.Ephemeral });
+        }
+        const target = interaction.options.getString('target') || 'Organisation';
+        const subject = `🔔 SIMULATION: Sicherheitswarnung von ${target} — Dringende Aktion erforderlich (TRAINING)`;
+        const fakeLink = 'http://fake-link[dot]example';
+        const body = `📧 Betreff: ${subject}\n\nHallo,\n\nWir haben verdächtige Aktivitäten in Ihrem Konto festgestellt. Bitte bestätigen Sie Ihre Daten sofort unter ${fakeLink} (DIES IST EINE SIMULATION — NICHT KLICKEN).\n\nMit freundlichen Grüßen,\n${target} Sicherheitsteam`;
+
+        // Educational tips (red flags)
+        const tips = `**Phishing-Prüfpunkte:**\n- Dringender Tonfall / Drohungen\n- Ungewöhnliche Absenderadresse\n- Aufforderung, persönliche Daten über Links einzugeben\n- Rechtschreib-/Grammatikfehler\n\n**Hinweis:** Dies ist eine harmlose Trainings-Simulation. Niemals auf unbekannte Links klicken.`;
+
+        // Post as an embed into the channel but clearly marked
+        const embed = {
+            title: `Simulierte Phishing-Mail (${target})`,
+            description: `Dies ist ein TRAININGSBEISPIEL — KEINE echte Nachricht.`,
+            color: 0xFFA500,
+            fields: [
+                { name: 'Nachricht (simuliert)', value: '```' + body + '```' },
+                { name: 'Erkennungs-Tipps', value: tips }
+            ]
+        };
+
+        await interaction.reply({ content: 'Simulierte Phishing-Mail generiert und gepostet (sichtbar).', flags: MessageFlags.Ephemeral });
+        await interaction.channel.send({ embeds: [embed] });
+        return;
+    }
+
+    if (cmd === 'virus') {
+        // Admin-only and limited to avoid spam
+        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
+        }
+        const type = (interaction.options.getString('type') || 'fun').toLowerCase();
+        await interaction.reply({ content: `🦠 Starte harmlose ${type}-Simulation (begrenzte Nachrichten)...`, flags: MessageFlags.Ephemeral });
+
+        const messages = [];
+        if (type === 'trojan') {
+            messages.push('🦠 Trojan aktiviert! Prozesse starten...');
+            messages.push('⚠️ Fehlende Datei: payload.dll');
+            messages.push('🔁 Selbstreplikation simuliert...');
+        } else if (type === 'worm') {
+            messages.push('🐛 Wurm verbreitet sich in Channels...');
+            messages.push('📡 Netzwerkverkehr erhöht (simuliert)...');
+            messages.push('✅ Simulation abgeschlossen.');
+        } else {
+            messages.push('🧪 Virus-Simulation: Spaßmodus aktiviert!');
+            messages.push('💥 Error 404: Brain not found');
+            messages.push('🤖 System: Kaffee-Level niedrig');
+        }
+
+        // limit to 4 messages to avoid spam
+        for (let i = 0; i < Math.min(messages.length, 4); i++) {
+            await interaction.channel.send({ content: `${messages[i]} (SIMULIERT)` });
+            await new Promise(r => setTimeout(r, 700 + Math.floor(Math.random() * 400)));
+        }
+        await interaction.channel.send({ content: '🛡️ Hinweis: Dies war eine harmlose Simulation zu Trainings-/Unterhaltungszwecken. Keine echten Angriffe wurden durchgeführt.' });
+        return;
+    }
+
+    // /scan - gather simple server stats and show as embed
+    if (cmd === 'scan') {
+        if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl kann nur in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+        await interaction.deferReply();
+        try {
+            // Try to ensure members cached for accurate counts
+            try { await interaction.guild.members.fetch(); } catch(_){}
+            const guild = interaction.guild;
+            const memberCount = guild.memberCount || guild.members.cache.size;
+            const adminCount = guild.members.cache.filter(m => m.permissions.has(PermissionFlagsBits.Administrator)).size;
+            const roleCount = guild.roles.cache.size;
+            const channelCount = guild.channels.cache.size;
+
+            // simple weakness heuristics
+            const weaknesses = [];
+            if (roleCount > 50) weaknesses.push('Viele Rollen (über 50)');
+            if (adminCount > 5) weaknesses.push('Viele Admins (>5)');
+            if (memberCount < 10) weaknesses.push('Wenig Mitglieder (<10)');
+            if (channelCount > 200) weaknesses.push('Viele Channels (>200)');
+            if (!weaknesses.length) weaknesses.push('Keine offensichtlichen Schwächen gefunden');
+
+            const embed = {
+                title: `🔍 Server-Scan: ${guild.name}`,
+                color: 0x00AAFF,
+                fields: [
+                    { name: 'Mitglieder', value: String(memberCount), inline: true },
+                    { name: 'Admins', value: String(adminCount), inline: true },
+                    { name: 'Rollen', value: String(roleCount), inline: true },
+                    { name: 'Channels', value: String(channelCount), inline: true },
+                    { name: 'Schwächen / Hinweise', value: weaknesses.join('\n') }
+                ],
+                timestamp: new Date().toISOString()
+            };
+
+            return interaction.editReply({ embeds: [embed] });
+        } catch (e) {
+            console.error('scan error', e);
+            return interaction.editReply({ content: 'Fehler beim Scannen des Servers.' });
+        }
+    }
+
+    // /decrypt - try base64, hex, rot13
+    if (cmd === 'decrypt') {
+        const code = interaction.options.getString('code') || '';
+        if (!code) return interaction.reply({ content: 'Bitte gib den zu entschlüsselnden Text an.', flags: MessageFlags.Ephemeral });
+        await interaction.deferReply();
+        let result = null;
+        let method = null;
+        try {
+            const cleaned = code.trim();
+            // try base64 (simple heuristic)
+            const base64Re = /^[A-Za-z0-9+/=\s]+$/;
+            if (base64Re.test(cleaned) && cleaned.length % 4 === 0) {
+                try {
+                    const buf = Buffer.from(cleaned.replace(/\s+/g,''), 'base64');
+                    const txt = buf.toString('utf8');
+                    // if printable, accept
+                    if (txt && txt.length > 0) { result = txt; method = 'base64'; }
+                } catch (_e) {}
+            }
+            // try hex
+            if (!result) {
+                const hexRe = /^[0-9a-fA-F]+$/;
+                if (hexRe.test(cleaned) && cleaned.length % 2 === 0) {
+                    try {
+                        const buf = Buffer.from(cleaned, 'hex');
+                        const txt = buf.toString('utf8');
+                        if (txt && txt.length > 0) { result = txt; method = 'hex'; }
+                    } catch (_e) {}
+                }
+            }
+            // try rot13
+            if (!result) {
+                const rot13 = (s) => s.replace(/[A-Za-z]/g, (c) => {
+                    const base = c <= 'Z' ? 65 : 97;
+                    return String.fromCharCode(((c.charCodeAt(0) - base + 13) % 26) + base);
+                });
+                const r = rot13(cleaned);
+                if (r && r !== cleaned) { result = r; method = 'rot13'; }
+            }
+        } catch (e) {
+            console.error('decrypt error', e);
+        }
+
+        if (!result) {
+            return interaction.editReply({ content: 'Keine unterstützte Entschlüsselung gefunden (getestet: base64, hex, ROT13).' });
+        }
+
+        const embed = {
+            title: '🔓 Entschlüsselt',
+            color: 0x22AA22,
+            fields: [
+                { name: 'Eingabe', value: '```' + code + '```' },
+                { name: 'Methode (vermutet)', value: method },
+                { name: 'Ergebnis', value: '```' + result + '```' }
+            ],
+            footer: { text: 'Hinweis: Dies sind einfache Heuristiken; bei Binärdaten kann die Ausgabe fehlerhaft sein.' }
+        };
+        return interaction.editReply({ embeds: [embed] });
+    }
+
+        // /exploit - provide fake exploit suggestions for learning/entertainment
+        if (cmd === 'exploit') {
+            const bug = (interaction.options.getString('bug') || '').trim().toLowerCase();
+            if (!bug) return interaction.reply({ content: 'Bitte gib ein Bug-Thema an, z.B. `ping-spam`.', flags: MessageFlags.Ephemeral });
+
+            const map = {
+                'ping-spam': 'Exploit gefunden: /ping everyone (aber blockiert von Bot – gut so!). Level: Noob',
+                'role-escalation': 'Exploit (gefälscht): Verwende fehlende Role-Checks; Mitigation: Verifiziere Berechtigungen serverseitig. Level: Medium',
+                'mass-embed': 'Exploit (gefälscht): Sende viele Embeds gleichzeitig; Mitigation: Rate-Limits und Validierung. Level: Low',
+                'sql-injection': 'Exploit (gefälscht): Unsichere DB-Queries; Mitigation: Prepared Statements / ORM. Level: High'
+            };
+
+            const out = map[bug] || `Exploit gefunden (simuliert): ${bug} -> Beispiel-Payload: "/${bug} --exploit" (Nur Simulation)`;
+            const warn = '\n\n⚠️ Hinweis: Dies ist eine harmlose Simulation/Aufsummierung. Missbrauch von Schwachstellen ist illegal. Nutze die Information nur zu Bildungszwecken.';
+            return interaction.reply({ content: out + warn, flags: MessageFlags.Ephemeral });
+        }
+
+        // /bitcoin - simulate mining or wallet result (fun)
+        if (cmd === 'bitcoin') {
+            const amt = interaction.options.getInteger('amount') || 1;
+            if (amt <= 0) return interaction.reply({ content: 'Bitte gib eine positive Menge an.', flags: MessageFlags.Ephemeral });
+
+            // Random BTC result per unit (small amounts). Small chance of loss.
+            const pricePerBTC = 20000 + Math.random() * 40000; // random price between 20k and 60k
+            let btc = (Math.random() * 0.01) * amt; // up to 0.01 BTC per unit
+            const loss = Math.random() < 0.12; // 12% chance of loss
+            if (loss) btc = - (Math.random() * 0.005) * amt;
+            const eur = Math.round(btc * pricePerBTC * 100) / 100;
+            const btcStr = Math.abs(btc).toFixed(6);
+            const resultText = btc < 0 ? `❌ Verlust: -${btcStr} BTC (≈ ${eur} €)` : `✅ Gewinn: ${btcStr} BTC (≈ ${eur} €)`;
+            const extra = btc < 0 ? 'Ouch — Pech gehabt. Denk an sichere Passwörter!' : "Nice! Glück gehabt. Investiere weise.";
+            return interaction.reply({ content: `⛏️ Simulation: ${resultText}\n${extra}\n(Preisannahme: ~${Math.round(pricePerBTC)} €/BTC)`, flags: MessageFlags.Ephemeral });
+        }
+});
+
+    // Handlers for /set-prefix and /set-entertainment
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.__blocked) return;
+        const cmd = interaction.commandName;
+        if (cmd !== 'set-prefix' && cmd !== 'set-entertainment') return;
+
+        const cfg = await loadConfig();
+        // collect owners
+        const owners = new Set();
+        if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+        if (cfg.ownerId) owners.add(cfg.ownerId);
+        if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+        if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+        const isOwner = owners.has(interaction.user.id);
+
+        if (cmd === 'set-prefix') {
+            const prefix = interaction.options.getString('prefix');
+            const makeGlobal = interaction.options.getBoolean('global') || false;
+            if (!prefix) return interaction.reply({ content: 'Bitte gib ein Prefix an.', flags: MessageFlags.Ephemeral });
+            if (makeGlobal) {
+                if (!isOwner) return interaction.reply({ content: 'Nur der Bot-Owner darf globale Einstellungen setzen.', flags: MessageFlags.Ephemeral });
+                cfg._global = cfg._global || {};
+                cfg._global.prefix = prefix;
+                await saveConfig(cfg);
+                return interaction.reply({ content: `Globales Prefix gesetzt: ${prefix}`, flags: MessageFlags.Ephemeral });
+            }
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Du brauchst die Berechtigung "Server verwalten".', flags: MessageFlags.Ephemeral });
+            cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
+            cfg[interaction.guild.id].prefix = prefix;
+            await saveConfig(cfg);
+            return interaction.reply({ content: `Prefix für diesen Server gesetzt: ${prefix}`, flags: MessageFlags.Ephemeral });
+        }
+
+        if (cmd === 'set-entertainment') {
+            const val = (interaction.options.getString('value') || '').toLowerCase();
+            const makeGlobal = interaction.options.getBoolean('global') || false;
+            const bool = (val === 'true' || val === '1' || val === 'on');
+            if (makeGlobal) {
+                if (!isOwner) return interaction.reply({ content: 'Nur der Bot-Owner darf globale Einstellungen setzen.', flags: MessageFlags.Ephemeral });
+                cfg._global = cfg._global || {};
+                cfg._global.entertainmentEnabled = bool;
+                await saveConfig(cfg);
+                return interaction.reply({ content: `Global entertainmentEnabled gesetzt: ${bool}`, flags: MessageFlags.Ephemeral });
+            }
+            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Du brauchst die Berechtigung "Server verwalten".', flags: MessageFlags.Ephemeral });
+            cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
+            cfg[interaction.guild.id].entertainmentEnabled = bool;
+            await saveConfig(cfg);
+            return interaction.reply({ content: `Entertainment-Commands für diesen Server sind nun: ${bool}`, flags: MessageFlags.Ephemeral });
+        }
+    });
 
 // Additional handlers for support/ticket and audit features
 client.on('interactionCreate', async interaction => {
