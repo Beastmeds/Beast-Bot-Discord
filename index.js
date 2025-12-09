@@ -408,8 +408,11 @@ const commands = [
     },
     {
         name: 'say',
-        description: 'Lässt den Bot eine Nachricht senden (Admin only)',
-        options: [{ name: 'message', description: 'Nachricht', type: 3, required: true }]
+        description: 'Lässt den Bot eine Nachricht senden (Admin only). Optional: DM an einen User.',
+        options: [
+            { name: 'message', description: 'Nachricht', type: 3, required: true },
+            { name: 'user', description: 'User (DM Ziel, optional)', type: 6, required: false }
+        ]
     },
     {
         name: 'userinfo',
@@ -599,6 +602,11 @@ async function saveConfig(cfg) {
     } catch (e) {
         console.error('Failed to save config:', e);
     }
+}
+
+// small sleep helper used by animated replies
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Simple in-memory cooldown map: key -> timestamp when allowed next
@@ -1310,50 +1318,7 @@ client.on('interactionCreate', async interaction => {
                 }
             }
 
-                const frames = [
-                    '⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'
-                ];
-
-                const steps = [
-                    { text: 'Verbindung zum Ziel herstellen', pct: 5 },
-                    { text: 'Firewall analysieren', pct: 18 },
-                    { text: 'Ports scannen', pct: 31 },
-                    { text: 'Exploit vorbereiten', pct: 45 },
-                    { text: 'Payload übertragen', pct: 58 },
-                    { text: 'Sitzung etablieren', pct: 72 },
-                    { text: 'Credentials extrahieren', pct: 86 },
-                    { text: 'Abschlussarbeiten', pct: 96 }
-                ];
-
-                // animate through steps with spinner and progress bar
-                for (let i = 0; i < steps.length; i++) {
-                    const s = steps[i];
-                    const blocks = Math.floor((s.pct / 100) * 20);
-                    const bar = '█'.repeat(blocks) + '░'.repeat(20 - blocks);
-                    // show a short spinner animation between edits
-                    for (let f = 0; f < 3; f++) {
-                        const frame = frames[(i + f) % frames.length];
-                        const content = `${frame} 🔒 Hacking ${user.tag} — ${s.text}\n[${bar}] ${s.pct}%`;
-                        try { await interaction.editReply({ content }); } catch (_) {}
-                        await sleep(220 + Math.floor(Math.random() * 180));
-                    }
-                }
-
-                // final reveal with embed-like block
-                const fakePasswords = ['1234', 'password', 'qwerty', 'letmein', 'P@ssw0rd', 'hunter2', 'iloveyou', 'dragon', 'sunshine'];
-                const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
-                const final = {
-                    content: `✅ Zugriff erlangt auf ${user.tag} — Ergebnis:`,
-                };
-                try { await interaction.editReply(final); } catch (_) {}
-                // small dramatic pause
-                await sleep(600);
-                try {
-                    await interaction.followUp({ content: '🔑 Gefundenes Passwort: `' + found + '` (Nur Spaß! 🔒)', flags: MessageFlags.Ephemeral });
-                } catch (e) {
-                    try { await interaction.channel.send({ content: `🔑 Gefundenes Passwort: ${found} (Nur Spaß!)` }); } catch(_){ }
-                }
-                return;
+                // no animation here (was accidentally inserted)
 
             // Name hinzufügen
             ctx.font = '60px sans-serif';
