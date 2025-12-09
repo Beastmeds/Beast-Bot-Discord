@@ -464,36 +464,7 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Monkey-patch Interaction.reply / editReply to add friendly emoji prefixes globally
-try {
-    const _origReply = Interaction.prototype.reply;
-    const _origEdit = Interaction.prototype.editReply;
-    Interaction.prototype.reply = function (payload) {
-        try {
-            // Determine if reply is ephemeral by checking payload or flags
-            const isEphemeral = (payload && payload.ephemeral) || (payload && payload.flags && (payload.flags & MessageFlags.Ephemeral));
-            const prefix = isEphemeral ? '🔒 ' : '💬 ';
-            if (typeof payload === 'string') return _origReply.call(this, prefix + payload);
-            const out = { ...payload };
-            if (out.content) out.content = prefix + out.content; else out.content = prefix;
-            return _origReply.call(this, out);
-        } catch (e) {
-            return _origReply.call(this, payload);
-        }
-    };
-    Interaction.prototype.editReply = function (payload) {
-        try {
-            const isEphemeral = (payload && payload.ephemeral) || (payload && payload.flags && (payload.flags & MessageFlags.Ephemeral));
-            const prefix = isEphemeral ? '🔒 ' : '💬 ';
-            if (typeof payload === 'string') return _origEdit.call(this, prefix + payload);
-            const out = { ...payload };
-            if (out.content) out.content = prefix + out.content; else out.content = prefix;
-            return _origEdit.call(this, out);
-        } catch (e) {
-            return _origEdit.call(this, payload);
-        }
-    };
-} catch (e) { console.warn('Failed to monkey-patch Interaction methods', e); }
+// Removed monkey-patch of Interaction.reply/editReply — avoid modifying library prototypes
 
 // Bot starten
 client.once('ready', async () => {
