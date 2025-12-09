@@ -303,6 +303,102 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
+// Handler: /shoutout -> generate a shoutout graphic for a user
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.__blocked) return;
+    if (interaction.commandName !== 'shoutout') return;
+
+    const target = interaction.options.getUser('user');
+    const text = interaction.options.getString('message') || '';
+    if (!target) return interaction.reply({ content: 'Bitte gib einen User an.', flags: MessageFlags.Ephemeral });
+
+    await interaction.deferReply();
+    try {
+        // load avatar
+        const avatarURL = target.displayAvatarURL({ extension: 'png', size: 512 });
+        const avatarImg = await Canvas.loadImage(avatarURL);
+
+        const width = 1200; const height = 630;
+        const canvas = Canvas.createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // background gradient
+        const grad = ctx.createLinearGradient(0, 0, width, height);
+        grad.addColorStop(0, '#ff5f6d');
+        grad.addColorStop(1, '#ffc371');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, width, height);
+
+        // dark overlay for contrast
+        ctx.fillStyle = 'rgba(0,0,0,0.2)';
+        ctx.fillRect(0, 0, width, height);
+
+        // Title
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 72px Sans';
+        ctx.textAlign = 'left';
+        ctx.fillText('SHOUTOUT', 60, 110);
+
+        // Draw avatar circle
+        const avSize = 320;
+        const avX = 60;
+        const avY = 150;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(avX + avSize/2, avY + avSize/2, avSize/2, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.clip();
+        ctx.drawImage(avatarImg, avX, avY, avSize, avSize);
+        ctx.restore();
+
+        // Username
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 48px Sans';
+        ctx.textAlign = 'left';
+        ctx.fillText(target.username, avX + avSize + 40, avY + 80);
+
+        // discriminator or tag
+        const tag = `#${target.discriminator || (target.username ? target.username : '')}`;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '28px Sans';
+        ctx.fillText(tag, avX + avSize + 40, avY + 120);
+
+        // custom message
+        if (text) {
+            ctx.fillStyle = '#fff';
+            ctx.font = '28px Sans';
+            const wrapWidth = width - (avX + avSize + 80);
+            const words = text.split(' ');
+            let line = '';
+            let y = avY + 180;
+            for (let n = 0; n < words.length; n++) {
+                const testLine = line + words[n] + ' ';
+                const metrics = ctx.measureText(testLine);
+                if (metrics.width > wrapWidth && n > 0) {
+                    ctx.fillText(line, avX + avSize + 40, y);
+                    line = words[n] + ' ';
+                    y += 36;
+                } else {
+                    line = testLine;
+                }
+            }
+            if (line) ctx.fillText(line, avX + avSize + 40, y);
+        }
+
+        // small footer
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.font = '20px Sans';
+        ctx.fillText('Beast Bot • Shoutout', width - 260, height - 40);
+
+        const buffer = canvas.toBuffer();
+        await interaction.editReply({ files: [{ attachment: buffer, name: 'shoutout.png' }] });
+    } catch (e) {
+        console.error('/shoutout error', e);
+        try { await interaction.editReply({ content: 'Fehler beim Erstellen der Shoutout-Grafik.' }); } catch (_) { }
+    }
+});
+
 // Monkey-patch Interaction.reply / editReply to add friendly emoji prefixes globally
 try {
     const _origReply = Interaction.prototype.reply;
@@ -443,6 +539,14 @@ const commands = [
                 type: 5,
                 required: false
             }
+        ]
+    },
+    {
+        name: 'shoutout',
+        description: 'Erstellt automatisch eine Shoutout-Grafik für einen User/Streamer',
+        options: [
+            { name: 'user', description: 'Der User/Streamer', type: 6, required: true },
+            { name: 'message', description: 'Kurze Nachricht (optional)', type: 3, required: false }
         ]
     },
     {
