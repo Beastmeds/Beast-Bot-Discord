@@ -100,12 +100,33 @@ client.on('interactionCreate', async interaction => {
     await interaction.deferReply({ ephemeral: true });
     const guild = interaction.guild;
     const created = { channels: [], roles: [], categoryId: null };
+
+    // Check bot permissions before proceeding
+    try {
+        const botMember = interaction.guild.members.me || await interaction.guild.members.fetch(client.user.id);
+        const missing = [];
+        if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) missing.push('ManageChannels');
+        if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) missing.push('ManageRoles');
+        if (!botMember.permissions.has(PermissionFlagsBits.ViewChannel)) missing.push('ViewChannel');
+        if (missing.length) {
+            return interaction.editReply({ content: `Ich benötige folgende Berechtigungen, um ein Setup anzulegen: ${missing.join(', ')}. Bitte passe die Bot-Berechtigungen an und versuche es erneut.` });
+        }
+    } catch (e) {
+        console.warn('permission check failed', e && e.message);
+    }
     try {
         // Create a category for the setup
+        await interaction.editReply({ content: 'Erstelle Kategorie...' });
         const catName = `Beast • ${typ.charAt(0).toUpperCase() + typ.slice(1)}`;
-        const category = await guild.channels.create({ name: catName, type: ChannelType.GuildCategory, reason: 'Setup durch /setup' });
-        created.categoryId = category.id;
-        await sleep(300);
+        let category = null;
+        try {
+            category = await guild.channels.create({ name: catName, type: ChannelType.GuildCategory, reason: 'Setup durch /setup' });
+            created.categoryId = category.id;
+        } catch (e) {
+            console.warn('category create failed', e && e.message);
+            return interaction.editReply({ content: `Fehler: Konnte Kategorie nicht erstellen: ${e.message || String(e)}` });
+        }
+        await sleep(200);
 
         // Define common roles and style-specific roles
         const baseRoles = [
@@ -121,13 +142,14 @@ client.on('interactionCreate', async interaction => {
         };
 
         // Create roles (skip if they exist)
+        await interaction.editReply({ content: 'Erstelle Rollen...' });
         for (const r of baseRoles) {
             let existing = guild.roles.cache.find(x => x.name === r.name);
             if (!existing) {
                 try { existing = await guild.roles.create({ name: r.name, color: r.color, reason: 'Setup roles' }); } catch (e) { console.warn('role create failed', r.name, e && e.message); }
             }
             if (existing) created.roles.push(existing.id);
-            await sleep(200);
+            await sleep(120);
         }
         const extras = styleRoles[typ] || [];
         for (const r of extras) {
@@ -136,7 +158,7 @@ client.on('interactionCreate', async interaction => {
                 try { existing = await guild.roles.create({ name: r.name, color: r.color, reason: 'Setup style role' }); } catch (e) { console.warn('role create failed', r.name, e && e.message); }
             }
             if (existing) created.roles.push(existing.id);
-            await sleep(200);
+            await sleep(120);
         }
 
         // Create some channels per type under the category
@@ -144,7 +166,7 @@ client.on('interactionCreate', async interaction => {
             try {
                 const ch = await guild.channels.create({ name, type: ChannelType.GuildText, parent: category.id, reason: 'Setup channel' });
                 created.channels.push(ch.id);
-                await sleep(150);
+                await sleep(100);
                 return ch;
             } catch (e) {
                 console.warn('create channel failed', name, e && e.message);
@@ -152,6 +174,7 @@ client.on('interactionCreate', async interaction => {
         };
 
         // common channels
+        await interaction.editReply({ content: 'Erstelle Channels...' });
         await makeText('welcome');
         await makeText('rules');
         await makeText('announcements');
@@ -160,7 +183,7 @@ client.on('interactionCreate', async interaction => {
         if (typ === 'gaming') {
             await makeText('matchmaking');
             await makeText('clips');
-            await guild.channels.create({ name: 'Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }).then(v=>created.channels.push(v.id)).catch(()=>{});
+            try { const v = await guild.channels.create({ name: 'Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'community') {
             await makeText('introductions');
             await makeText('events');
@@ -168,12 +191,12 @@ client.on('interactionCreate', async interaction => {
         } else if (typ === 'musik') {
             await makeText('tracks');
             await makeText('playlists');
-            await guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }).then(v=>created.channels.push(v.id)).catch(()=>{});
+            try { const v = await guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'streamer') {
             await makeText('live-updates');
             await makeText('clips');
             await makeText('supporters');
-            await guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }).then(v=>created.channels.push(v.id)).catch(()=>{});
+            try { const v = await guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         }
 
         // Save created IDs to config
