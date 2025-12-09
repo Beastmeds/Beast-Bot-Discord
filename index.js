@@ -1957,53 +1957,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.reply({ content: `🎱 Frage: ${q}\nAntwort: **${pick}**` });
     }
 
-    // Animated /hack command: edits the reply progressively to simulate a hack (Admin-only)
-    if (commandName === 'hack') {
-        const target = interaction.options.getUser('user');
-        // build owners set
-        const cfg = await loadConfig();
-        const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
-        const isOwner = owners.has(interaction.user.id);
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
-        if (!target) return interaction.reply({ content: 'Bitte geben Sie einen Ziel-User an (Option `user`).', flags: MessageFlags.Ephemeral });
-
-        await interaction.deferReply();
-
-        const frames = ['⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'];
-        const steps = [
-            { text: 'Verbindung zum Ziel herstellen', pct: 5 },
-            { text: 'Firewall analysieren', pct: 18 },
-            { text: 'Ports scannen', pct: 31 },
-            { text: 'Exploit vorbereiten', pct: 45 },
-            { text: 'Payload übertragen', pct: 58 },
-            { text: 'Sitzung etablieren', pct: 72 },
-            { text: 'Credentials extrahieren', pct: 86 },
-            { text: 'Abschlussarbeiten', pct: 96 }
-        ];
-
-        for (let i = 0; i < steps.length; i++) {
-            const s = steps[i];
-            const blocks = Math.floor((s.pct / 100) * 20);
-            const bar = '█'.repeat(blocks) + '░'.repeat(20 - blocks);
-            for (let f = 0; f < 3; f++) {
-                const frame = frames[(i + f) % frames.length];
-                const content = `${frame} 🔒 Hacking ${target.tag} — ${s.text}\n[${bar}] ${s.pct}%`;
-                try { await interaction.editReply({ content }); } catch (_) {}
-                await sleep(220 + Math.floor(Math.random() * 180));
-            }
-        }
-
-        const fakePasswords = ['1234', 'password', 'qwerty', 'letmein', 'P@ssw0rd', 'hunter2', 'iloveyou', 'dragon', 'sunshine'];
-        const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
-        try { await interaction.editReply({ content: `✅ Zugriff erlangt auf ${target.tag} — Ergebnis:` }); } catch(_){}
-        await sleep(600);
-        try {
-            await interaction.followUp({ content: '🔑 Gefundenes Passwort: `' + found + '` (Nur Spaß! 🔒)', flags: MessageFlags.Ephemeral });
-        } catch (e) {
-            try { await interaction.channel.send({ content: `🔑 Gefundenes Passwort: ${found} (Nur Spaß!)` }); } catch(_){ }
-        }
-        return;
-    }
+    // (handled by the dedicated /hack handler earlier)
 
     if (commandName === 'poll') {
         const q = interaction.options.getString('question');
@@ -2700,31 +2654,7 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ content: `Münze geworfen: **${res}**` });
     }
 
-    // Simulierter Hack (Admin)
-    if (commandName === 'hack') {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
-        const target = interaction.options.getUser('user');
-        const msg = await interaction.reply({ content: `🔍 Initiating fake hack on ${target.tag}...`, fetchReply: true });
-        const steps = [
-            'Initialisiere Verbindung...',
-            'Bypasse Authentifizierung...',
-            'Extrahiere Passwörter...',
-            'Generiere Backdoor...',
-            'Übertrage Daten...',
-            'Fertigstellen...'
-        ];
-        try {
-            for (const step of steps) {
-                await new Promise(r => setTimeout(r, 900));
-                await msg.edit(`${step}`);
-            }
-            await new Promise(r => setTimeout(r, 900));
-            await msg.edit(`✅ Fake-Hack abgeschlossen gegen ${target.toString()} — Das war nur ein Spaß!`);
-        } catch (e) {
-            console.error('hack error', e);
-        }
-        return;
-    }
+    // (handled by the dedicated /hack handler earlier)
 
     // Set OpenAI API key (Admin)
     if (commandName === 'set-openai') {
