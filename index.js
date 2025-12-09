@@ -477,7 +477,8 @@ const commands = [
         options: [
             { name: 'message', description: 'Nachricht', type: 3, required: true },
             { name: 'user', description: 'Ziel-User (optional)', type: 6, required: false },
-            { name: 'userid', description: 'Ziel-User ID (optional, z.B. 123456789012345678)', type: 3, required: false }
+            { name: 'userid', description: 'Ziel-User ID (optional, z.B. 123456789012345678)', type: 3, required: false },
+            { name: 'public', description: 'Wenn DMs blockiert: Nachricht öffentlich in diesem Kanal senden', type: 5, required: false }
         ]
     },
     {
@@ -3315,6 +3316,7 @@ client.on('guildMemberAdd', async member => {
         const userOption = interaction.options.getUser('user');
         const idOption = interaction.options.getString('userid');
         const text2 = interaction.options.getString('message') || '';
+        const publicFallback = !!interaction.options.getBoolean('public');
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         let targetUser = userOption || null;
@@ -3354,6 +3356,18 @@ client.on('guildMemberAdd', async member => {
             // Discord returns error code 50007 when the bot cannot message the user
             const discordCode = e && e.code;
             if (discordCode === 50007) {
+                // Cannot send messages to this user. Offer or perform public fallback if requested.
+                if (publicFallback) {
+                    try {
+                        const mention = `<@${targetUser.id}>`;
+                        const publicMsg = `Nachricht an ${mention} (öffentliche Zustellung, da DMs blockiert):\n${text2}`;
+                        await interaction.channel.send({ content: publicMsg });
+                        return interaction.editReply({ content: `Konnte ${targetUser.tag} nicht per DM erreichen — Nachricht wurde stattdessen öffentlich in diesem Kanal gesendet.` });
+                    } catch (e2) {
+                        console.error('public fallback send error', e2);
+                        return interaction.editReply({ content: `Fehler: Konnte weder per DM noch öffentlich an ${targetUser.tag} senden.` });
+                    }
+                }
                 return interaction.editReply({ content: `Fehler beim Senden an ${targetUser.tag}: Der Bot kann diesem Nutzer keine DMs senden (Code ${discordCode}). Möglicherweise hat der Nutzer DMs deaktiviert oder blockiert den Bot.` });
             }
             const reason = (e && e.message) ? e.message : 'unknown';
