@@ -202,30 +202,37 @@ client.on('interactionCreate', async interaction => {
             }
         };
 
-        // common channels
-        const commonChannels = ['welcome', 'rules', 'announcements', 'general'];
+        // common channels (with emoji prefixes for nicer appearance)
+        const commonChannels = ['👋-welcome', '📜-rules', '📣-announcements', '💬-general'];
         await interaction.editReply({ content: 'Erstelle Channels...' });
         for (let i = 0; i < commonChannels.length; i++) {
             await makeText(commonChannels[i], i + 1, commonChannels.length);
         }
 
         if (typ === 'gaming') {
-            await makeText('matchmaking', 1, 3);
-            await makeText('clips', 2, 3);
-            try { const v = await withTimeout(guild.channels.create({ name: 'Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            await makeText('🎯-matchmaking', 1, 4);
+            await makeText('🎬-clips', 2, 4);
+            await makeText('🕹️-looking-for-group', 3, 4);
+            try { const v1 = await withTimeout(guild.channels.create({ name: 'Gaming 1', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v1) created.channels.push(v1.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            try { const v2 = await withTimeout(guild.channels.create({ name: 'Gaming 2', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v2) created.channels.push(v2.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'community') {
-            await makeText('introductions', 1, 3);
-            await makeText('events', 2, 3);
-            await makeText('off-topic', 3, 3);
+            await makeText('🙋-introductions', 1, 4);
+            await makeText('🎉-events', 2, 4);
+            await makeText('☕-off-topic', 3, 4);
+            try { const v1 = await withTimeout(guild.channels.create({ name: 'Lounge 1', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v1) created.channels.push(v1.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            try { const v2 = await withTimeout(guild.channels.create({ name: 'Lounge 2', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v2) created.channels.push(v2.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'musik') {
-            await makeText('tracks', 1, 3);
-            await makeText('playlists', 2, 3);
-            try { const v = await withTimeout(guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            await makeText('🎵-tracks', 1, 4);
+            await makeText('🎼-playlists', 2, 4);
+            await makeText('🎤-requests', 3, 4);
+            try { const v1 = await withTimeout(guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v1) created.channels.push(v1.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            try { const v2 = await withTimeout(guild.channels.create({ name: 'Karaoke', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v2) created.channels.push(v2.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'streamer') {
-            await makeText('live-updates', 1, 3);
-            await makeText('clips', 2, 3);
-            await makeText('supporters', 3, 3);
-            try { const v = await withTimeout(guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            await makeText('🔴-live-updates', 1, 4);
+            await makeText('🎞️-clips', 2, 4);
+            await makeText('⭐-supporters', 3, 4);
+            try { const v1 = await withTimeout(guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v1) created.channels.push(v1.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            try { const v2 = await withTimeout(guild.channels.create({ name: 'Guest', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v2) created.channels.push(v2.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         }
 
         // Save created IDs to config
