@@ -473,8 +473,12 @@ const commands = [
     },
     {
         name: 'send',
-        description: 'Sendet eine private Nachricht (DM) an einen beliebigen Discord-User (Admin only)',
-        options: [ { name: 'user', description: 'Ziel-User', type: 6, required: true }, { name: 'message', description: 'Nachricht', type: 3, required: true } ]
+        description: 'Sendet dem angegebenen User eine DM (Admin-only).',
+        options: [
+            { name: 'message', description: 'Nachricht', type: 3, required: true },
+            { name: 'user', description: 'Ziel-User (optional)', type: 6, required: false },
+            { name: 'userid', description: 'Ziel-User ID (optional, z.B. 123456789012345678)', type: 3, required: false }
+        ]
     },
     {
         name: 'userinfo',
@@ -3308,15 +3312,31 @@ client.on('guildMemberAdd', async member => {
             return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
         }
 
-        const target = interaction.options.getUser('user');
+        const userOption = interaction.options.getUser('user');
+        const idOption = interaction.options.getString('userid');
         const text2 = interaction.options.getString('message') || '';
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        let targetUser = userOption || null;
+        if (!targetUser && idOption) {
+            // try to fetch by ID (allow sending to users not in the guild)
+            try {
+                targetUser = await client.users.fetch(idOption);
+            } catch (e) {
+                console.error('fetch user by id failed', e);
+                return interaction.editReply({ content: `Konnte User mit ID ${idOption} nicht finden.` });
+            }
+        }
+
+        if (!targetUser) return interaction.editReply({ content: 'Bitte gib einen Ziel-User an (entweder über das User-Feld oder eine UserID).' });
+
         try {
-            await target.send({ content: text2 });
-            return interaction.editReply({ content: `Private Nachricht erfolgreich an ${target.tag} gesendet.` });
+            await targetUser.send({ content: text2 });
+            return interaction.editReply({ content: `Private Nachricht erfolgreich an ${targetUser.tag} gesendet.` });
         } catch (e) {
             console.error('send DM error', e);
-            return interaction.editReply({ content: `Fehler beim Senden an ${target ? target.tag : 'Unknown'}: ${e.message || 'unknown'}` });
+            const reason = (e && e.message) ? e.message : 'unknown';
+            return interaction.editReply({ content: `Fehler beim Senden an ${targetUser.tag}: ${reason}. Möglicherweise hat der Nutzer DMs deaktiviert oder blockiert den Bot.` });
         }
     });
 
