@@ -629,6 +629,11 @@ const commands = [
     }
     ,
     {
+        name: 'list-guilds',
+        description: 'Zeigt dem Bot-Owner alle Gilden, in denen der Bot ist, inkl. (wenn möglich) Invite-Links'
+    },
+
+    {
         name: 'team',
         description: 'Team-Befehle ähnlich wie owner (add/remove/list/only)',
         options: [
@@ -3312,6 +3317,113 @@ client.on('guildMemberAdd', async member => {
         } catch (e) {
             console.error('send DM error', e);
             return interaction.editReply({ content: `Fehler beim Senden an ${target ? target.tag : 'Unknown'}: ${e.message || 'unknown'}` });
+        }
+    });
+
+    // Owner-only: list all guilds the bot is in, attempt to create invite links where allowed
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.__blocked) return;
+        if (interaction.commandName !== 'list-guilds') return;
+
+        const cfg = await loadConfig();
+        const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+        if (!owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur der Bot-Owner kann diese Information abrufen.', flags: MessageFlags.Ephemeral });
+
+        await interaction.deferReply({ ephemeral: true });
+        try {
+            const fetched = await client.guilds.fetch();
+            const lines = [];
+            for (const [gid, gdata] of fetched) {
+                let g = null;
+                try { g = await client.guilds.fetch(gid); } catch(_) { g = gdata; }
+                const name = (g && g.name) ? g.name : (`Guild ${gid}`);
+                const memberCount = (g && g.memberCount) ? g.memberCount : 'unknown';
+                let inviteText = 'kein Invite (no permission)';
+                try {
+                    const channels = await (g.channels.fetch ? g.channels.fetch().catch(()=>null) : Promise.resolve(g.channels || null));
+                    if (channels) {
+                        const ch = Array.from(channels.values()).find(c => c && c.type === ChannelType.GuildText && c.permissionsFor && c.permissionsFor(client.user) && c.permissionsFor(client.user).has(PermissionFlagsBits.CreateInstantInvite));
+                        if (ch && ch.createInvite) {
+                            const inv = await ch.createInvite({ maxAge: 0, unique: true }).catch(()=>null);
+                            if (inv && inv.code) inviteText = `https://discord.gg/${inv.code}`;
+                        }
+                    }
+                } catch (e) {}
+                lines.push(`${name} (id: ${gid}) — Mitglieder: ${memberCount} — Invite: ${inviteText}`);
+            }
+            const out = lines.join('\n');
+            if (out.length > 1800) {
+                const buf = Buffer.from(out, 'utf8');
+                await interaction.editReply({ content: 'Die Liste ist zu lang — siehe Anhang.', files: [{ attachment: buf, name: 'guilds.txt' }] });
+            } else {
+                await interaction.editReply({ content: 'Gildenliste:\n' + out });
+            }
+        } catch (e) {
+            console.error('list-guilds error', e);
+            try { await interaction.editReply({ content: 'Fehler beim Abrufen der Gilden: ' + (e.message || String(e)) }); } catch(_){}
+        }
+    });
+
+    // Ensure /hack is handled: edits reply progressively (robust fallback)
+    client.on('interactionCreate', async interaction => {
+        try {
+            if (!interaction.isChatInputCommand()) return;
+            if (interaction.__blocked) return;
+            if (interaction.commandName !== 'hack') return;
+
+            // permission: ManageGuild or owner
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            const isOwner = owners.has(interaction.user.id);
+            if (!interaction.member || !interaction.member.permissions || (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner)) {
+                return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
+            }
+
+            const target = interaction.options.getUser('user');
+            if (!target) return interaction.reply({ content: 'Bitte gib ein Ziel-User an.', flags: MessageFlags.Ephemeral });
+
+            // Reply (if not already replied/deferred) and then edit progressively
+            if (!interaction.replied && !interaction.deferred) {
+                try { await interaction.reply({ content: '🔒 Initialisiere Hack-Simulation...', fetchReply: false }); } catch (_) { }
+            } else {
+                try { await interaction.editReply({ content: '🔒 Initialisiere Hack-Simulation...' }); } catch (_) { }
+            }
+
+            const frames = ['⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'];
+            const steps = [
+                { text: 'Initialisiere Verbindung', pct: 8 },
+                { text: 'Handshake & Fingerprint', pct: 18 },
+                { text: 'Firewall-Bypass', pct: 34 },
+                { text: 'Ports scannen', pct: 46 },
+                { text: 'Exploit vorbereiten', pct: 60 },
+                { text: 'Payload übertragen', pct: 74 },
+                { text: 'Sitzung aufbauen', pct: 88 },
+                { text: 'Daten extrahieren', pct: 98 }
+            ];
+
+            for (let i = 0; i < steps.length; i++) {
+                const s = steps[i];
+                const blocks = Math.floor((s.pct / 100) * 24);
+                const bar = '█'.repeat(blocks) + '░'.repeat(24 - blocks);
+                for (let f = 0; f < 3; f++) {
+                    const frame = frames[(i + f) % frames.length];
+                    const content = `${frame}  【${target.tag}】  ${s.text}\n` + '```' + bar + ' ' + s.pct + '%```' + '\n' + '_Status: running..._';
+                    try {
+                        if (interaction.deferred || interaction.replied) await interaction.editReply({ content }); else await interaction.reply({ content, fetchReply: false });
+                    } catch (e) { /* ignore edit errors */ }
+                    await sleep(180 + Math.floor(Math.random() * 220));
+                }
+            }
+
+            const fakePasswords = ['1234','password','qwerty','letmein','P@ssw0rd','hunter2','iloveyou','dragon','sunshine'];
+            const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
+            try { await interaction.editReply({ content: `✅ Zugriff erlangt auf ${target.tag} — Ergebnisse:` }); } catch(_){}
+            await sleep(650);
+            try { await interaction.followUp({ content: '🔑 Gefundenes Passwort: `' + found + '` (Nur Spaß! 🔒)', flags: MessageFlags.Ephemeral }); } catch (e) { try { await interaction.channel.send({ content: '🔑 Gefundenes Passwort: ' + found + ' (Nur Spaß!)' }); } catch(_){} }
+        } catch (e) {
+            console.error('hack handler error', e);
+            try { if (!interaction.replied) await interaction.reply({ content: 'Fehler beim Ausführen des /hack Befehls.', flags: MessageFlags.Ephemeral }); else await interaction.editReply({ content: 'Fehler beim Ausführen des /hack Befehls.' }); } catch(_){ }
         }
     });
 
