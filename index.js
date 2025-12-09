@@ -95,6 +95,7 @@ client.on('interactionCreate', async interaction => {
     }
 
     const typ = interaction.options.getString('typ');
+    const createRoles = !!interaction.options.getBoolean('roles');
     if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
 
     await interaction.deferReply({ ephemeral: true });
@@ -149,37 +150,41 @@ client.on('interactionCreate', async interaction => {
             streamer: [{ name: 'Streamer', color: '#00d4ff' }, { name: 'Subscriber', color: '#ffd700' }]
         };
 
-        // Create roles (skip if they exist)
-        await interaction.editReply({ content: 'Erstelle Rollen...' });
-        for (let i = 0; i < baseRoles.length; i++) {
-            const r = baseRoles[i];
-            let existing = guild.roles.cache.find(x => x.name === r.name);
-            if (!existing) {
-                try {
-                    existing = await withTimeout(guild.roles.create({ name: r.name, color: r.color, reason: 'Setup roles' }), 8000);
-                } catch (e) {
-                    console.warn('role create failed', r.name, e && e.message);
+        // Create roles (skip if they exist) — can be disabled via the `roles` option
+        if (createRoles) {
+            await interaction.editReply({ content: 'Erstelle Rollen...' });
+            for (let i = 0; i < baseRoles.length; i++) {
+                const r = baseRoles[i];
+                let existing = guild.roles.cache.find(x => x.name === r.name);
+                if (!existing) {
+                    try {
+                        existing = await withTimeout(guild.roles.create({ name: r.name, color: r.color, reason: 'Setup roles' }), 8000);
+                    } catch (e) {
+                        console.warn('role create failed', r.name, e && e.message);
+                    }
                 }
+                if (existing) created.roles.push(existing.id);
+                // update progress so interaction stays alive and user sees progress
+                try { await interaction.editReply({ content: `Erstelle Rollen... (${i + 1}/${baseRoles.length})` }); } catch (_) {}
+                await sleep(120);
             }
-            if (existing) created.roles.push(existing.id);
-            // update progress so interaction stays alive and user sees progress
-            try { await interaction.editReply({ content: `Erstelle Rollen... (${i + 1}/${baseRoles.length})` }); } catch (_) {}
-            await sleep(120);
-        }
-        const extras = styleRoles[typ] || [];
-        for (let i = 0; i < extras.length; i++) {
-            const r = extras[i];
-            let existing = guild.roles.cache.find(x => x.name === r.name);
-            if (!existing) {
-                try {
-                    existing = await withTimeout(guild.roles.create({ name: r.name, color: r.color, reason: 'Setup style role' }), 8000);
-                } catch (e) {
-                    console.warn('style role create failed', r.name, e && e.message);
+            const extras = styleRoles[typ] || [];
+            for (let i = 0; i < extras.length; i++) {
+                const r = extras[i];
+                let existing = guild.roles.cache.find(x => x.name === r.name);
+                if (!existing) {
+                    try {
+                        existing = await withTimeout(guild.roles.create({ name: r.name, color: r.color, reason: 'Setup style role' }), 8000);
+                    } catch (e) {
+                        console.warn('style role create failed', r.name, e && e.message);
+                    }
                 }
+                if (existing) created.roles.push(existing.id);
+                try { await interaction.editReply({ content: `Erstelle style-Rollen... (${i + 1}/${extras.length})` }); } catch (_) {}
+                await sleep(120);
             }
-            if (existing) created.roles.push(existing.id);
-            try { await interaction.editReply({ content: `Erstelle style-Rollen... (${i + 1}/${extras.length})` }); } catch (_) {}
-            await sleep(120);
+        } else {
+            try { await interaction.editReply({ content: 'Rollen werden übersprungen (nur Struktur wird erstellt)...' }); } catch(_) {}
         }
 
         // Create some channels per type under the category
@@ -408,6 +413,30 @@ const commands = [
         ]
     },
     {
+        name: 'setup',
+        description: 'Erstellt eine schöne Server-Struktur mit Emojis',
+        options: [
+            {
+                name: 'typ',
+                description: 'Art des Setups',
+                type: 3,
+                required: true,
+                choices: [
+                    { name: '🎮 Gaming Server', value: 'gaming' },
+                    { name: '💬 Community Server', value: 'community' },
+                    { name: '🎵 Musik Server', value: 'musik' },
+                    { name: '📺 Streamer Server', value: 'streamer' }
+                ]
+            },
+            {
+                name: 'roles',
+                description: 'Rollen erstellen? (true=erstellt Rollen, false=nur Struktur)',
+                type: 5,
+                required: false
+            }
+        ]
+    },
+    {
         name: 'test-welcome',
         description: 'Sendet eine Test-Willkommensnachricht an den konfigurierten Channel'
     },
@@ -446,25 +475,7 @@ const commands = [
             }
         ]
     },
-    {
-        name: 'setup',
-        description: 'Erstellt eine schöne Server-Struktur mit Emojis',
-        options: [
-            {
-                name: 'typ',
-                description: 'Art des Setups',
-                type: 3,
-                required: true,
-                choices: [
-                    { name: '🎮 Gaming Server', value: 'gaming' },
-                    { name: '💬 Community Server', value: 'community' },
-                    { name: '🎵 Musik Server', value: 'musik' },
-                    { name: '📺 Streamer Server', value: 'streamer' }
-                ]
-            }
-        ]
-    },
-
+    
     {
         name: 'setup-delete',
         description: 'Entfernt das zuvor mit /setup erstellte Server-Layout (Admin only)'
