@@ -24,6 +24,66 @@ const client = new Client({
     ],
 });
 
+    // Animated /hack handler: edits reply progressively to look "cool"
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.__blocked) return;
+        if (interaction.commandName !== 'hack') return;
+
+        // Admin or owner only
+        const cfg = await loadConfig();
+        const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+        const isOwner = owners.has(interaction.user.id);
+        if (!interaction.member || !interaction.member.permissions || (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner)) {
+            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
+        }
+
+        const target = interaction.options.getUser('user');
+        if (!target) return interaction.reply({ content: 'Bitte gib ein Ziel an (User).', flags: MessageFlags.Ephemeral });
+
+        await interaction.deferReply();
+
+        const frames = ['⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'];
+        const steps = [
+            { text: 'Initialisiere Verbindung', pct: 8 },
+            { text: 'Handshake & Fingerprint', pct: 18 },
+            { text: 'Firewall-Bypass', pct: 34 },
+            { text: 'Ports scannen', pct: 46 },
+            { text: 'Exploit vorbereiten', pct: 60 },
+            { text: 'Payload übertragen', pct: 74 },
+            { text: 'Sitzung aufbauen', pct: 88 },
+            { text: 'Daten extrahieren', pct: 98 }
+        ];
+
+        // initial reply
+        try { await interaction.editReply({ content: '🔒 Starte Hack-Simulation...' }); } catch(_){}
+
+        for (let i = 0; i < steps.length; i++) {
+            const s = steps[i];
+            const blocks = Math.floor((s.pct / 100) * 24);
+            const bar = '█'.repeat(blocks) + '░'.repeat(24 - blocks);
+            // show a few spinner frames per step
+            for (let f = 0; f < 3; f++) {
+                const frame = frames[(i + f) % frames.length];
+                const content = frame + '  ' + '【' + target.tag + '】  ' + s.text + '\n' + '```' + bar + ' ' + s.pct + '%```' + '\n' + '_Status: running..._';
+                try { await interaction.editReply({ content }); } catch(_){}
+                await sleep(180 + Math.floor(Math.random() * 220));
+            }
+        }
+
+        // final reveal
+        const fakePasswords = ['1234','password','qwerty','letmein','P@ssw0rd','hunter2','iloveyou','dragon','sunshine'];
+        const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
+        try { await interaction.editReply({ content: '✅ Zugriff erlangt auf ' + target.tag + ' — Ergebnisse werden vorbereitet...' }); } catch(_){}
+        await sleep(650);
+        try {
+            await interaction.followUp({ content: '🔑 Gefundenes Passwort: `' + found + '` (Nur Spaß! 🔒)', flags: MessageFlags.Ephemeral });
+        } catch (e) {
+            try { await interaction.channel.send({ content: '🔑 Gefundenes Passwort: ' + found + ' (Nur Spaß!)' }); } catch(_){ }
+        }
+        return;
+    });
+
 // Monkey-patch Interaction.reply / editReply to add friendly emoji prefixes globally
 try {
     const _origReply = Interaction.prototype.reply;
@@ -408,11 +468,13 @@ const commands = [
     },
     {
         name: 'say',
-        description: 'Lässt den Bot eine Nachricht senden (Admin only). Optional: DM an einen User.',
-        options: [
-            { name: 'message', description: 'Nachricht', type: 3, required: true },
-            { name: 'user', description: 'User (DM Ziel, optional)', type: 6, required: false }
-        ]
+        description: 'Lässt den Bot eine Nachricht in diesem Kanal senden (Admin only)',
+        options: [ { name: 'message', description: 'Nachricht', type: 3, required: true } ]
+    },
+    {
+        name: 'send',
+        description: 'Sendet eine private Nachricht (DM) an einen beliebigen Discord-User (Admin only)',
+        options: [ { name: 'user', description: 'Ziel-User', type: 6, required: true }, { name: 'message', description: 'Nachricht', type: 3, required: true } ]
     },
     {
         name: 'userinfo',
@@ -3219,27 +3281,37 @@ client.on('guildMemberAdd', async member => {
             return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
         }
 
+        // /say: always send message into the channel where command is used
         const text = interaction.options.getString('message') || '';
-        const target = interaction.options.getUser('user');
-
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+            await interaction.channel.send({ content: text });
+            return interaction.editReply({ content: 'Nachricht erfolgreich in diesem Kanal gesendet.' });
+        } catch (e) {
+            console.error('say channel send error', e);
+            return interaction.editReply({ content: `Fehler beim Senden in Kanal: ${e.message || 'unknown'}` });
+        }
+    });
 
-        if (target) {
-            try {
-                await target.send({ content: text });
-                return interaction.editReply({ content: `Private Nachricht erfolgreich an ${target.tag} gesendet.` });
-            } catch (e) {
-                console.error('say DM error', e);
-                return interaction.editReply({ content: `Fehler beim Senden an ${target.tag}: ${e.message || 'unknown'}` });
-            }
-        } else {
-            try {
-                await interaction.editReply({ content: 'Nachricht gesendet in diesem Kanal.' });
-                await interaction.channel.send({ content: text });
-            } catch (e) {
-                console.error('say channel send error', e);
-                return interaction.editReply({ content: `Fehler beim Senden in Kanal: ${e.message || 'unknown'}` });
-            }
+    // New handler: /send -> DM a specified user (Admin only)
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.__blocked) return;
+        if (interaction.commandName !== 'send') return;
+
+        if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
+        }
+
+        const target = interaction.options.getUser('user');
+        const text2 = interaction.options.getString('message') || '';
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        try {
+            await target.send({ content: text2 });
+            return interaction.editReply({ content: `Private Nachricht erfolgreich an ${target.tag} gesendet.` });
+        } catch (e) {
+            console.error('send DM error', e);
+            return interaction.editReply({ content: `Fehler beim Senden an ${target ? target.tag : 'Unknown'}: ${e.message || 'unknown'}` });
         }
     });
 
