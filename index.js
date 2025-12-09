@@ -84,6 +84,166 @@ const client = new Client({
         return;
     });
 
+// Handler: /setup -> create server layout + roles
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.__blocked) return;
+    if (interaction.commandName !== 'setup') return;
+
+    if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
+    }
+
+    const typ = interaction.options.getString('typ');
+    if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+
+    await interaction.deferReply({ ephemeral: true });
+    const guild = interaction.guild;
+    const created = { channels: [], roles: [], categoryId: null };
+    try {
+        // Create a category for the setup
+        const catName = `Beast • ${typ.charAt(0).toUpperCase() + typ.slice(1)}`;
+        const category = await guild.channels.create({ name: catName, type: ChannelType.GuildCategory, reason: 'Setup durch /setup' });
+        created.categoryId = category.id;
+        await sleep(300);
+
+        // Define common roles and style-specific roles
+        const baseRoles = [
+            { name: 'Admin', color: '#ff0000' },
+            { name: 'Moderator', color: '#ff8800' },
+            { name: 'Member', color: '#00ff88' }
+        ];
+        const styleRoles = {
+            gaming: [{ name: 'Gamer', color: '#8b00ff' }],
+            community: [{ name: 'Community', color: '#0077ff' }],
+            musik: [{ name: 'Musiker', color: '#ff00aa' }],
+            streamer: [{ name: 'Streamer', color: '#00d4ff' }, { name: 'Subscriber', color: '#ffd700' }]
+        };
+
+        // Create roles (skip if they exist)
+        for (const r of baseRoles) {
+            let existing = guild.roles.cache.find(x => x.name === r.name);
+            if (!existing) {
+                try { existing = await guild.roles.create({ name: r.name, color: r.color, reason: 'Setup roles' }); } catch (e) { console.warn('role create failed', r.name, e && e.message); }
+            }
+            if (existing) created.roles.push(existing.id);
+            await sleep(200);
+        }
+        const extras = styleRoles[typ] || [];
+        for (const r of extras) {
+            let existing = guild.roles.cache.find(x => x.name === r.name);
+            if (!existing) {
+                try { existing = await guild.roles.create({ name: r.name, color: r.color, reason: 'Setup style role' }); } catch (e) { console.warn('role create failed', r.name, e && e.message); }
+            }
+            if (existing) created.roles.push(existing.id);
+            await sleep(200);
+        }
+
+        // Create some channels per type under the category
+        const makeText = async (name) => {
+            try {
+                const ch = await guild.channels.create({ name, type: ChannelType.GuildText, parent: category.id, reason: 'Setup channel' });
+                created.channels.push(ch.id);
+                await sleep(150);
+                return ch;
+            } catch (e) {
+                console.warn('create channel failed', name, e && e.message);
+            }
+        };
+
+        // common channels
+        await makeText('welcome');
+        await makeText('rules');
+        await makeText('announcements');
+        await makeText('general');
+
+        if (typ === 'gaming') {
+            await makeText('matchmaking');
+            await makeText('clips');
+            await guild.channels.create({ name: 'Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }).then(v=>created.channels.push(v.id)).catch(()=>{});
+        } else if (typ === 'community') {
+            await makeText('introductions');
+            await makeText('events');
+            await makeText('off-topic');
+        } else if (typ === 'musik') {
+            await makeText('tracks');
+            await makeText('playlists');
+            await guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }).then(v=>created.channels.push(v.id)).catch(()=>{});
+        } else if (typ === 'streamer') {
+            await makeText('live-updates');
+            await makeText('clips');
+            await makeText('supporters');
+            await guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }).then(v=>created.channels.push(v.id)).catch(()=>{});
+        }
+
+        // Save created IDs to config
+        const cfg = await loadConfig();
+        cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
+        cfg[interaction.guild.id].setup = { created, style: typ };
+        await saveConfig(cfg);
+
+        return interaction.editReply({ content: `Setup '${typ}' abgeschlossen. Angelegte Channels: ${created.channels.length}, Rollen: ${created.roles.length}.` });
+    } catch (e) {
+        console.error('/setup error', e);
+        return interaction.editReply({ content: `Fehler beim Erstellen des Setups: ${e.message || String(e)}` });
+    }
+});
+
+// Handler: /setup-delete -> remove previously created setup (Admin only)
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.__blocked) return;
+    if (interaction.commandName !== 'setup-delete') return;
+
+    if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+        return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
+    }
+    if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+
+    await interaction.deferReply({ ephemeral: true });
+    try {
+        const cfg = await loadConfig();
+        const gcfg = cfg[interaction.guild.id] || {};
+        if (!gcfg.setup || !gcfg.setup.created) return interaction.editReply({ content: 'Kein gespeichertes Setup für diesen Server gefunden.' });
+
+        const created = gcfg.setup.created;
+        const results = { channels: 0, roles: 0 };
+
+        // Delete channels
+        for (const cid of (created.channels || [])) {
+            try {
+                const ch = await interaction.guild.channels.fetch(cid).catch(()=>null);
+                if (ch) { await ch.delete('Cleanup setup'); results.channels++; }
+            } catch (e) { console.warn('failed to delete channel', cid, e && e.message); }
+            await sleep(120);
+        }
+
+        // Delete category
+        if (created.categoryId) {
+            try { const cat = await interaction.guild.channels.fetch(created.categoryId).catch(()=>null); if (cat) { await cat.delete('Cleanup setup category'); } } catch(e){/*ignore*/}
+        }
+
+        // Delete roles
+        for (const rid of (created.roles || [])) {
+            try {
+                const role = await interaction.guild.roles.fetch(rid).catch(()=>null);
+                if (role) { await role.delete('Cleanup setup role'); results.roles++; }
+            } catch (e) { console.warn('failed to delete role', rid, e && e.message); }
+            await sleep(150);
+        }
+
+        // Remove setup entry from config
+        delete gcfg.setup;
+        cfg[interaction.guild.id] = gcfg;
+        await saveConfig(cfg);
+
+        return interaction.editReply({ content: `Setup entfernt. Gelöschte Channels: ${results.channels}, gelöschte Rollen: ${results.roles}.` });
+    } catch (e) {
+        console.error('/setup-delete error', e);
+        return interaction.editReply({ content: `Fehler beim Entfernen des Setups: ${e.message || String(e)}` });
+    }
+});
+
 // Monkey-patch Interaction.reply / editReply to add friendly emoji prefixes globally
 try {
     const _origReply = Interaction.prototype.reply;
@@ -253,10 +413,16 @@ const commands = [
                 choices: [
                     { name: '🎮 Gaming Server', value: 'gaming' },
                     { name: '💬 Community Server', value: 'community' },
-                    { name: '🎵 Musik Server', value: 'musik' }
+                    { name: '🎵 Musik Server', value: 'musik' },
+                    { name: '📺 Streamer Server', value: 'streamer' }
                 ]
             }
         ]
+    },
+
+    {
+        name: 'setup-delete',
+        description: 'Entfernt das zuvor mit /setup erstellte Server-Layout (Admin only)'
     },
     {
         name: 'profil',
