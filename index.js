@@ -124,16 +124,18 @@ client.on('interactionCreate', async interaction => {
         console.warn('permission check failed', e && e.message);
     }
     try {
-        // Create a category for the setup
+        // Create a category for the setup (use timeout to avoid hanging)
         await interaction.editReply({ content: 'Erstelle Kategorie...' });
         const catName = `Beast • ${typ.charAt(0).toUpperCase() + typ.slice(1)}`;
         let category = null;
         try {
-            category = await guild.channels.create({ name: catName, type: ChannelType.GuildCategory, reason: 'Setup durch /setup' });
+            category = await withTimeout(guild.channels.create({ name: catName, type: ChannelType.GuildCategory, reason: 'Setup durch /setup' }), 9000);
+            if (!category) throw new Error('Keine Kategorie zurückgegeben');
             created.categoryId = category.id;
         } catch (e) {
             console.warn('category create failed', e && e.message);
-            return interaction.editReply({ content: `Fehler: Konnte Kategorie nicht erstellen: ${e.message || String(e)}` });
+            try { await interaction.editReply({ content: `Fehler: Konnte Kategorie nicht erstellen: ${e.message || String(e)}. Prüfe Bot-Berechtigungen oder versuche es später.` }); } catch (_) {}
+            return;
         }
         await sleep(200);
 
@@ -1510,55 +1512,7 @@ client.on('interactionCreate', async interaction => {
         });
     }
 
-    if (commandName === 'setup') {
-        const typ = interaction.options.getString('typ');
-        await interaction.deferReply();
-
-        try {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                return await interaction.editReply('Du brauchst die Berechtigung "Kanäle verwalten" für diesen Befehl! ❌');
-            }
-
-            const categoryStructure = {
-                'gaming': {
-                    '🎮 Gaming': ['🎯-allgemein', '🎲-lobby', '🏆-turniere'],
-                    '🔊 Voice': ['🎮-gaming-1', '🎮-gaming-2', '🎵-musik'],
-                    '📢 Info': ['📜-regeln', '📢-ankündigungen']
-                },
-                'community': {
-                    '💬 Community': ['🗣️-chat', '🤝-vorstellung', '🎉-events'],
-                    '🔊 Voice': ['🗣️-talk-1', '🗣️-talk-2', '🎵-musik'],
-                    '📢 Info': ['📜-regeln', '📢-news']
-                },
-                'musik': {
-                    '🎵 Musik': ['🎵-musik-chat', '🎼-song-wünsche', '🎸-künstler'],
-                    '🔊 Voice': ['🎵-musik-1', '🎵-musik-2', '🎤-karaoke'],
-                    '📢 Info': ['📜-regeln', '📢-events']
-                }
-            };
-
-            const structure = categoryStructure[typ];
-            for (const [categoryName, channels] of Object.entries(structure)) {
-                const category = await interaction.guild.channels.create({
-                    name: categoryName,
-                    type: 4 // CategoryChannel
-                });
-
-                for (const channelName of channels) {
-                    await interaction.guild.channels.create({
-                        name: channelName,
-                        type: channelName.startsWith('🔊') ? 2 : 0, // 2 for voice, 0 for text
-                        parent: category.id
-                    });
-                }
-            }
-
-            await interaction.editReply(`Server-Setup für "${typ}" wurde erfolgreich erstellt! ✅`);
-        } catch (error) {
-            console.error(error);
-            await interaction.editReply('Es gab einen Fehler beim Erstellen der Server-Struktur! ❌');
-        }
-    }
+    
 
     if (commandName === 'profil') {
         const stil = interaction.options.getString('stil');
