@@ -41,9 +41,38 @@ const client = new Client({
         const target = interaction.options.getUser('user');
         if (!target) return interaction.reply({ content: 'Bitte gib ein Ziel an (User).', flags: MessageFlags.Ephemeral });
 
-        await interaction.deferReply();
+        try {
+            await interaction.deferReply();
+        } catch (e) {
+            console.error('/hack: deferReply failed', e);
+            try { await interaction.reply({ content: 'Fehler beim Starten der Simulation.', flags: MessageFlags.Ephemeral }); } catch(_){}
+            return;
+        }
 
         const frames = ['⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'];
+        // helper to safely edit the deferred reply; falls back to followUp or channel send
+        const safeEdit = async (payload) => {
+            try {
+                await interaction.editReply(typeof payload === 'string' ? { content: payload } : payload);
+                return true;
+            } catch (err) {
+                console.error('/hack: editReply failed', err && err.message);
+                // try followUp
+                try {
+                    await interaction.followUp(typeof payload === 'string' ? { content: payload } : payload);
+                    return true;
+                } catch (err2) {
+                    console.error('/hack: followUp failed', err2 && err2.message);
+                    try {
+                        await interaction.channel.send(typeof payload === 'string' ? payload : (payload && payload.content) || '');
+                        return true;
+                    } catch (err3) {
+                        console.error('/hack: channel.send fallback failed', err3 && err3.message);
+                        return false;
+                    }
+                }
+            }
+        };
         const steps = [
             { text: 'Initialisiere Verbindung', pct: 8 },
             { text: 'Handshake & Fingerprint', pct: 18 },
@@ -56,7 +85,7 @@ const client = new Client({
         ];
 
         // initial reply
-        try { await interaction.editReply({ content: '🔒 Starte Hack-Simulation...' }); } catch(_){}
+        await safeEdit('🔒 Starte Hack-Simulation...');
 
         for (let i = 0; i < steps.length; i++) {
             const s = steps[i];
@@ -66,7 +95,8 @@ const client = new Client({
             for (let f = 0; f < 3; f++) {
                 const frame = frames[(i + f) % frames.length];
                 const content = frame + '  ' + '【' + target.tag + '】  ' + s.text + '\n' + '```' + bar + ' ' + s.pct + '%```' + '\n' + '_Status: running..._';
-                try { await interaction.editReply({ content }); } catch(_){}
+                const ok = await safeEdit({ content });
+                if (!ok) console.warn('/hack: could not send update for step', i, 'frame', f);
                 await sleep(180 + Math.floor(Math.random() * 220));
             }
         }
@@ -74,12 +104,13 @@ const client = new Client({
         // final reveal
         const fakePasswords = ['1234','password','qwerty','letmein','P@ssw0rd','hunter2','iloveyou','dragon','sunshine'];
         const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
-        try { await interaction.editReply({ content: '✅ Zugriff erlangt auf ' + target.tag + ' — Ergebnisse werden vorbereitet...' }); } catch(_){}
+        await safeEdit('✅ Zugriff erlangt auf ' + target.tag + ' — Ergebnisse werden vorbereitet...');
         await sleep(650);
         try {
             await interaction.followUp({ content: '🔑 Gefundenes Passwort: `' + found + '` (Nur Spaß! 🔒)', flags: MessageFlags.Ephemeral });
         } catch (e) {
-            try { await interaction.channel.send({ content: '🔑 Gefundenes Passwort: ' + found + ' (Nur Spaß!)' }); } catch(_){ }
+            console.error('/hack: final followUp failed', e && e.message);
+            try { await interaction.channel.send({ content: '🔑 Gefundenes Passwort: ' + found + ' (Nur Spaß!)' }); } catch(_){ console.error('/hack: final channel.send failed'); }
         }
         return;
     });
