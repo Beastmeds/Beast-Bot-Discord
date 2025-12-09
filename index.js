@@ -3208,6 +3208,41 @@ client.on('guildMemberAdd', async member => {
     }
 });
 
+    // Additional interaction handler: /say that can DM a specified user
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.__blocked) return;
+        if (interaction.commandName !== 'say') return;
+
+        // Admin-only
+        if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+            return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
+        }
+
+        const text = interaction.options.getString('message') || '';
+        const target = interaction.options.getUser('user');
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        if (target) {
+            try {
+                await target.send({ content: text });
+                return interaction.editReply({ content: `Private Nachricht erfolgreich an ${target.tag} gesendet.` });
+            } catch (e) {
+                console.error('say DM error', e);
+                return interaction.editReply({ content: `Fehler beim Senden an ${target.tag}: ${e.message || 'unknown'}` });
+            }
+        } else {
+            try {
+                await interaction.editReply({ content: 'Nachricht gesendet in diesem Kanal.' });
+                await interaction.channel.send({ content: text });
+            } catch (e) {
+                console.error('say channel send error', e);
+                return interaction.editReply({ content: `Fehler beim Senden in Kanal: ${e.message || 'unknown'}` });
+            }
+        }
+    });
+
     // Add error handling for login
     client.login(process.env.DISCORD_TOKEN).catch(error => {
         console.error('Failed to login:', error);
