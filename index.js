@@ -101,6 +101,14 @@ client.on('interactionCreate', async interaction => {
     const guild = interaction.guild;
     const created = { channels: [], roles: [], categoryId: null };
 
+    // Helper: promise with timeout to avoid hanging operations
+    const withTimeout = (p, ms = 8000) => {
+        return Promise.race([
+            p,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('operation timeout')), ms))
+        ]);
+    };
+
     // Check bot permissions before proceeding
     try {
         const botMember = interaction.guild.members.me || await interaction.guild.members.fetch(client.user.id);
@@ -143,30 +151,44 @@ client.on('interactionCreate', async interaction => {
 
         // Create roles (skip if they exist)
         await interaction.editReply({ content: 'Erstelle Rollen...' });
-        for (const r of baseRoles) {
+        for (let i = 0; i < baseRoles.length; i++) {
+            const r = baseRoles[i];
             let existing = guild.roles.cache.find(x => x.name === r.name);
             if (!existing) {
-                try { existing = await guild.roles.create({ name: r.name, color: r.color, reason: 'Setup roles' }); } catch (e) { console.warn('role create failed', r.name, e && e.message); }
+                try {
+                    existing = await withTimeout(guild.roles.create({ name: r.name, color: r.color, reason: 'Setup roles' }), 8000);
+                } catch (e) {
+                    console.warn('role create failed', r.name, e && e.message);
+                }
             }
             if (existing) created.roles.push(existing.id);
+            // update progress so interaction stays alive and user sees progress
+            try { await interaction.editReply({ content: `Erstelle Rollen... (${i + 1}/${baseRoles.length})` }); } catch (_) {}
             await sleep(120);
         }
         const extras = styleRoles[typ] || [];
-        for (const r of extras) {
+        for (let i = 0; i < extras.length; i++) {
+            const r = extras[i];
             let existing = guild.roles.cache.find(x => x.name === r.name);
             if (!existing) {
-                try { existing = await guild.roles.create({ name: r.name, color: r.color, reason: 'Setup style role' }); } catch (e) { console.warn('role create failed', r.name, e && e.message); }
+                try {
+                    existing = await withTimeout(guild.roles.create({ name: r.name, color: r.color, reason: 'Setup style role' }), 8000);
+                } catch (e) {
+                    console.warn('style role create failed', r.name, e && e.message);
+                }
             }
             if (existing) created.roles.push(existing.id);
+            try { await interaction.editReply({ content: `Erstelle style-Rollen... (${i + 1}/${extras.length})` }); } catch (_) {}
             await sleep(120);
         }
 
         // Create some channels per type under the category
-        const makeText = async (name) => {
+        const makeText = async (name, idx, total) => {
             try {
-                const ch = await guild.channels.create({ name, type: ChannelType.GuildText, parent: category.id, reason: 'Setup channel' });
-                created.channels.push(ch.id);
-                await sleep(100);
+                const ch = await withTimeout(guild.channels.create({ name, type: ChannelType.GuildText, parent: category.id, reason: 'Setup channel' }), 9000);
+                if (ch) created.channels.push(ch.id);
+                try { await interaction.editReply({ content: `Erstelle Channels... (${idx}/${total})` }); } catch (_) {}
+                await sleep(80);
                 return ch;
             } catch (e) {
                 console.warn('create channel failed', name, e && e.message);
@@ -174,29 +196,29 @@ client.on('interactionCreate', async interaction => {
         };
 
         // common channels
+        const commonChannels = ['welcome', 'rules', 'announcements', 'general'];
         await interaction.editReply({ content: 'Erstelle Channels...' });
-        await makeText('welcome');
-        await makeText('rules');
-        await makeText('announcements');
-        await makeText('general');
+        for (let i = 0; i < commonChannels.length; i++) {
+            await makeText(commonChannels[i], i + 1, commonChannels.length);
+        }
 
         if (typ === 'gaming') {
-            await makeText('matchmaking');
-            await makeText('clips');
-            try { const v = await guild.channels.create({ name: 'Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            await makeText('matchmaking', 1, 3);
+            await makeText('clips', 2, 3);
+            try { const v = await withTimeout(guild.channels.create({ name: 'Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'community') {
-            await makeText('introductions');
-            await makeText('events');
-            await makeText('off-topic');
+            await makeText('introductions', 1, 3);
+            await makeText('events', 2, 3);
+            await makeText('off-topic', 3, 3);
         } else if (typ === 'musik') {
-            await makeText('tracks');
-            await makeText('playlists');
-            try { const v = await guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            await makeText('tracks', 1, 3);
+            await makeText('playlists', 2, 3);
+            try { const v = await withTimeout(guild.channels.create({ name: 'Lounge', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         } else if (typ === 'streamer') {
-            await makeText('live-updates');
-            await makeText('clips');
-            await makeText('supporters');
-            try { const v = await guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
+            await makeText('live-updates', 1, 3);
+            await makeText('clips', 2, 3);
+            await makeText('supporters', 3, 3);
+            try { const v = await withTimeout(guild.channels.create({ name: 'Stream Voice', type: ChannelType.GuildVoice, parent: category.id, reason: 'Setup voice' }), 9000); if (v) created.channels.push(v.id); } catch(e){console.warn('voice create failed', e && e.message);} 
         }
 
         // Save created IDs to config
