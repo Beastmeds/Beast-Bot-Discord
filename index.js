@@ -3331,12 +3331,33 @@ client.on('guildMemberAdd', async member => {
         if (!targetUser) return interaction.editReply({ content: 'Bitte gib einen Ziel-User an (entweder über das User-Feld oder eine UserID).' });
 
         try {
-            await targetUser.send({ content: text2 });
+            // Try to explicitly create a DM channel first (better for detailed errors)
+            let dmChannel = null;
+            try {
+                if (typeof targetUser.createDM === 'function') {
+                    dmChannel = await targetUser.createDM();
+                }
+            } catch (e) {
+                console.warn('createDM failed (will fallback to user.send):', e && e.message);
+            }
+
+            if (dmChannel && typeof dmChannel.send === 'function') {
+                await dmChannel.send({ content: text2 });
+            } else {
+                // fallback: user.send should normally create a DM as well
+                await targetUser.send({ content: text2 });
+            }
+
             return interaction.editReply({ content: `Private Nachricht erfolgreich an ${targetUser.tag} gesendet.` });
         } catch (e) {
             console.error('send DM error', e);
+            // Discord returns error code 50007 when the bot cannot message the user
+            const discordCode = e && e.code;
+            if (discordCode === 50007) {
+                return interaction.editReply({ content: `Fehler beim Senden an ${targetUser.tag}: Der Bot kann diesem Nutzer keine DMs senden (Code ${discordCode}). Möglicherweise hat der Nutzer DMs deaktiviert oder blockiert den Bot.` });
+            }
             const reason = (e && e.message) ? e.message : 'unknown';
-            return interaction.editReply({ content: `Fehler beim Senden an ${targetUser.tag}: ${reason}. Möglicherweise hat der Nutzer DMs deaktiviert oder blockiert den Bot.` });
+            return interaction.editReply({ content: `Fehler beim Senden an ${targetUser.tag}: ${reason}.` });
         }
     });
 
