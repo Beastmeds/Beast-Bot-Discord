@@ -109,8 +109,17 @@ const client = new Client({
             { text: 'Daten extrahieren', pct: 98 }
         ];
 
-        // initial reply
-        await safeEdit('🔒 Starte Hack-Simulation...');
+        // initial reply — ensure we actually have a message to edit, otherwise abort
+        const initialOk = await safeEdit('🔒 Starte Hack-Simulation...');
+        if (!initialOk) {
+            console.error('/hack: initial message could not be created; aborting animation to avoid indefinite thinking state');
+            try {
+                await interaction.followUp({ content: 'Fehler: Bot kann keine Nachrichten senden. Abbruch.', flags: MessageFlags.Ephemeral });
+            } catch (e) {
+                try { await interaction.channel.send('Fehler: Bot kann keine Nachrichten senden. Bitte prüfe Berechtigungen.'); } catch (_) { }
+            }
+            return;
+        }
 
         for (let i = 0; i < steps.length; i++) {
             const s = steps[i];
