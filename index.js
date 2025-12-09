@@ -50,21 +50,46 @@ const client = new Client({
         }
 
         const frames = ['⠁','⠂','⠄','⡀','⢀','⠠','⠐','⠈'];
-        // helper to safely edit the deferred reply; falls back to followUp or channel send
+        // helper to safely edit the deferred reply; reuses a single message to avoid spamming followUps
+        let lastBotMessage = null;
+        let channelFallbackMessage = null;
         const safeEdit = async (payload) => {
+            const content = typeof payload === 'string' ? payload : (payload && payload.content) || '';
             try {
-                await interaction.editReply(typeof payload === 'string' ? { content: payload } : payload);
+                if (lastBotMessage) {
+                    await lastBotMessage.edit(typeof payload === 'string' ? { content } : payload);
+                    return true;
+                }
+                // try to edit the original interaction reply
+                await interaction.editReply(typeof payload === 'string' ? { content } : payload);
+                try {
+                    lastBotMessage = await interaction.fetchReply();
+                } catch (fetchErr) {
+                    // not critical, we'll use followUp as a single fallback
+                    console.warn('/hack: fetchReply failed after editReply', fetchErr && fetchErr.message);
+                }
                 return true;
             } catch (err) {
-                console.error('/hack: editReply failed', err && err.message);
-                // try followUp
+                console.error('/hack: editReply/lastBotMessage.edit failed', err && err.message);
+                // use a single followUp message (create once, then edit it)
                 try {
-                    await interaction.followUp(typeof payload === 'string' ? { content: payload } : payload);
+                    if (channelFallbackMessage) {
+                        await channelFallbackMessage.edit({ content });
+                        return true;
+                    }
+                    // create a followUp and keep reference
+                    channelFallbackMessage = await interaction.followUp({ content, fetchReply: true });
                     return true;
                 } catch (err2) {
-                    console.error('/hack: followUp failed', err2 && err2.message);
+                    console.error('/hack: followUp/edit fallback failed', err2 && err2.message);
                     try {
-                        await interaction.channel.send(typeof payload === 'string' ? payload : (payload && payload.content) || '');
+                        // final fallback: send one channel message and reuse it
+                        if (channelFallbackMessage && channelFallbackMessage.channel) {
+                            await channelFallbackMessage.channel.send(content);
+                            return true;
+                        }
+                        const sent = await interaction.channel.send(content);
+                        channelFallbackMessage = sent;
                         return true;
                     } catch (err3) {
                         console.error('/hack: channel.send fallback failed', err3 && err3.message);
