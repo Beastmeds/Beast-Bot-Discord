@@ -2459,68 +2459,13 @@ client.on('interactionCreate', async interaction => {
         if (cd > 0) return interaction.reply({ content: `Bitte warte noch ${cd}s bevor du "/${cmd}" erneut benutzt.`, flags: MessageFlags.Ephemeral });
     }
 
-    if (cmd === 'hack') {
-        // Only allow admins
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
-        }
-        const user = interaction.options.getUser('user');
-        if (!user) return interaction.reply({ content: 'Bitte gib einen User an.', flags: MessageFlags.Ephemeral });
+    // Duplicate /hack handler removed here. Use the dedicated animated
+    // /hack handler earlier in this file which performs the safe edit
+    // flow and avoids reply/defer races.
 
-        await interaction.reply({ content: `🔒 Starte Simulation: Hacking ${user.tag}...`, flags: MessageFlags.Ephemeral });
-
-        const total = 10;
-        for (let i = 1; i <= total; i++) {
-            const pct = Math.floor((i / total) * 100);
-            const blocks = Math.floor((i / total) * 10);
-            const bar = '█'.repeat(blocks) + '░'.repeat(10 - blocks);
-            await interaction.followUp({ content: `🔒 Hacking ${user.tag}... [${bar}] ${pct}%`, flags: MessageFlags.Ephemeral });
-            await sleep(550 + Math.floor(Math.random() * 300));
-        }
-
-        const fakePasswords = ['1234', 'password', 'qwerty', 'letmein', 'P@ssw0rd', 'hunter2', 'iloveyou'];
-        const found = fakePasswords[Math.floor(Math.random() * fakePasswords.length)];
-        await interaction.followUp({ content: `✅ Erfolgreich! Gefundenes Passwort: \`${found}\` (Nur Spaß! 🔒)`, flags: MessageFlags.Ephemeral });
-        return;
-    }
-
-    if (cmd === 'bruteforce') {
-        // Only allow admins to run dramatic simulations
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-            return interaction.reply({ content: 'Nur Server-Admins dürfen diesen simulierten Befehl verwenden.', flags: MessageFlags.Ephemeral });
-        }
-        const target = interaction.options.getString('password');
-        if (!target) return interaction.reply({ content: 'Bitte gib ein Ziel-Passwort an.', flags: MessageFlags.Ephemeral });
-
-        await interaction.reply({ content: `🔐 Starte Bruteforce-Simulation gegen ein Passwort...`, flags: MessageFlags.Ephemeral });
-
-        // Wordlist-ish candidates for drama
-        const words = ['apple','banana','orange','letmein','1234','password','qwerty','admin','welcome','sunshine','dragon','iloveyou'];
-        // Decide at which attempt we'll 'find' the password to ensure predictable runtime
-        const successAt = Math.max(3, Math.floor(Math.random() * 40));
-        let attempt = 0;
-        for (;;) {
-            attempt++;
-            // generate a fake attempt: sometimes a known word, sometimes random
-            let attemptWord = Math.random() < 0.6 ? words[Math.floor(Math.random() * words.length)] : Math.random().toString(36).slice(2, 8);
-            const ok = (attempt === successAt);
-            // periodically update progress (every 5 attempts or on success)
-            if (attempt % 5 === 0 || ok) {
-                const status = ok ? `✅ Versuch ${attempt}: ${target} ✅ – Gefunden!` : `Versuch ${attempt}: ${attemptWord} ❌`;
-                await interaction.followUp({ content: status, flags: MessageFlags.Ephemeral });
-            }
-            if (ok) break;
-            // safety cap
-            if (attempt > 200) {
-                await interaction.followUp({ content: `Abbruch nach ${attempt} Versuchen (Simulation).`, flags: MessageFlags.Ephemeral });
-                break;
-            }
-            await sleep(200 + Math.floor(Math.random() * 300));
-        }
-        // final comedic verdict
-        await interaction.followUp({ content: `🧨 Bruteforce-Simulation abgeschlossen in ${attempt} Versuchen. Tipp: Verwende längere, einzigartige Passwörter!`, flags: MessageFlags.Ephemeral });
-        return;
-    }
+    // Duplicate /bruteforce handler removed here. Use the dedicated
+    // implementation earlier in the file to avoid multiple listeners
+    // acknowledging the same interaction.
     
     if (cmd === 'phish') {
         // Admin-only: create a clearly labeled, educational phishing example
