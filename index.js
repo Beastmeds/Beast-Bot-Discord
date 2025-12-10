@@ -24,6 +24,17 @@ const client = new Client({
     ],
 });
 
+// Global error handlers — prevent process from crashing on Discord API timing issues
+process.on('unhandledRejection', (reason, p) => {
+    console.error('Unhandled Rejection at:', p, 'reason:', reason && (reason.stack || reason));
+});
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err && (err.stack || err));
+});
+client.on('error', (err) => {
+    console.error('Discord client error:', err && (err.stack || err));
+});
+
 // Early guard: block commands that have been disabled via /owner disable (persisted in guild-config.json)
 client.on('interactionCreate', async interaction => {
     try {
@@ -43,13 +54,23 @@ client.on('interactionCreate', async interaction => {
         if (subName) checkNames.push(`${normalize(cmd)} ${normalize(subName)}`);
         if (checkNames.some(n => globalDisabled.includes(n)) && !isOwner) {
             try { console.log('DEBUG: blocking global disabled cmd', checkNames, 'for', interaction.user.tag); } catch(_){ }
-            try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+            if (!interaction.replied && !interaction.deferred) {
+                try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(err) { console.warn('early guard reply failed', err && err.message); return; }
+            } else {
+                try { console.warn('Guard: cannot reply, interaction already acknowledged'); } catch(_){}
+                return;
+            }
         }
 
         const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>normalize(x)) : [];
         if (checkNames.some(n => guildDisabled.includes(n)) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
              try { console.log('DEBUG: blocking guild disabled cmd', checkNames, 'in guild', interaction.guild?.id, 'for', interaction.user.tag); } catch(_){ }
-             try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Bitte kontaktiere einen Server-Admin oder Owner. 🔧', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+             if (!interaction.replied && !interaction.deferred) {
+                 try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Bitte kontaktiere einen Server-Admin oder Owner. 🔧', flags: MessageFlags.Ephemeral }); } catch(err) { console.warn('early guard reply failed', err && err.message); return; }
+             } else {
+                 try { console.warn('Guard: cannot reply, interaction already acknowledged'); } catch(_){}
+                 return;
+             }
         }
     } catch (e) {
         console.error('disabled guard error', e && e.message);
@@ -1112,6 +1133,21 @@ async function loadConfig() {
 
 async function saveConfig(cfg) {
     try {
+        // sanitize disabled command lists before writing
+        try {
+            const normalize = s => String(s || '').replace(/^\/*/, '').trim().toLowerCase();
+            if (cfg._global && Array.isArray(cfg._global.disabledCommands)) {
+                cfg._global.disabledCommands = Array.from(new Set(cfg._global.disabledCommands.map(d => normalize(d)).filter(Boolean)));
+            }
+            for (const k of Object.keys(cfg)) {
+                if (k === '_global') continue;
+                try {
+                    if (cfg[k] && Array.isArray(cfg[k].disabledCommands)) {
+                        cfg[k].disabledCommands = Array.from(new Set(cfg[k].disabledCommands.map(d => normalize(d)).filter(Boolean)));
+                    }
+                } catch (_) {}
+            }
+        } catch (_) {}
         await fs.writeFile(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8');
     } catch (e) {
         console.error('Failed to save config:', e);
