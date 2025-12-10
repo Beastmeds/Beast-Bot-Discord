@@ -36,13 +36,15 @@ client.on('interactionCreate', async interaction => {
         const isOwner = owners.has(interaction.user.id);
 
         const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>String(x).toLowerCase()) : [];
-        if (globalDisabled.includes(String(cmd).toLowerCase()) && !isOwner) {
-            try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
-        }
+            if (globalDisabled.includes(String(cmd).toLowerCase()) && !isOwner) {
+                try { console.log('DEBUG: blocking global disabled cmd', cmd, 'for', interaction.user.tag); } catch(_){}
+                try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+            }
 
         const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>String(x).toLowerCase()) : [];
         if (guildDisabled.includes(String(cmd).toLowerCase()) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
-            try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Bitte kontaktiere einen Server-Admin oder Owner. 🔧', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+             try { console.log('DEBUG: blocking guild disabled cmd', cmd, 'in guild', interaction.guild?.id, 'for', interaction.user.tag); } catch(_){}
+             try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Bitte kontaktiere einen Server-Admin oder Owner. 🔧', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
         }
     } catch (e) {
         console.error('disabled guard error', e && e.message);
@@ -2283,6 +2285,8 @@ client.on('interactionCreate', async interaction => {
                     if (!cfg._global.disabledCommands.map(d=>d.toLowerCase()).includes(cmdName)) cfg._global.disabledCommands.push(cmdName);
                     await saveConfig(cfg);
                     console.log(`Global command disabled: ${cmdName} by ${interaction.user.tag}`);
+                    // debug log written to console and persisted
+                    try { console.log('DEBUG: saved cfg._global.disabledCommands =', cfg._global.disabledCommands); } catch(_){}
                     return interaction.reply({ content: `✅ Befehl global deaktiviert: ${cmdName}`, flags: MessageFlags.Ephemeral });
                 } else {
                     // guild scope: allow server admins or owner
@@ -2292,6 +2296,7 @@ client.on('interactionCreate', async interaction => {
                     if (!cfg[interaction.guild.id].disabledCommands.map(d=>d.toLowerCase()).includes(cmdName)) cfg[interaction.guild.id].disabledCommands.push(cmdName);
                     await saveConfig(cfg);
                     console.log(`Guild command disabled: ${cmdName} in ${interaction.guild.id} by ${interaction.user.tag}`);
+                    try { console.log('DEBUG: saved cfg[gid].disabledCommands =', cfg[interaction.guild.id].disabledCommands); } catch(_){}
                     return interaction.reply({ content: `✅ Befehl für diesen Server deaktiviert: ${cmdName}`, flags: MessageFlags.Ephemeral });
                 }
             }
@@ -2306,6 +2311,7 @@ client.on('interactionCreate', async interaction => {
                     cfg._global.disabledCommands = cfg._global.disabledCommands.filter(x => (x || '').toLowerCase() !== cmdName);
                     await saveConfig(cfg);
                     console.log(`Global command enabled: ${cmdName} by ${interaction.user.tag}`);
+                    try { console.log('DEBUG: saved cfg._global.disabledCommands after enable =', cfg._global.disabledCommands); } catch(_){}
                     return interaction.reply({ content: `✅ Befehl global aktiviert: ${cmdName}`, flags: MessageFlags.Ephemeral });
                 } else {
                     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Du brauchst die Berechtigung "Server verwalten" oder musst Owner sein.', flags: MessageFlags.Ephemeral });
@@ -2314,6 +2320,7 @@ client.on('interactionCreate', async interaction => {
                     cfg[interaction.guild.id].disabledCommands = cfg[interaction.guild.id].disabledCommands.filter(x => (x || '').toLowerCase() !== cmdName);
                     await saveConfig(cfg);
                     console.log(`Guild command enabled: ${cmdName} in ${interaction.guild.id} by ${interaction.user.tag}`);
+                    try { console.log('DEBUG: saved cfg[gid].disabledCommands after enable =', cfg[interaction.guild.id].disabledCommands); } catch(_){}
                     return interaction.reply({ content: `✅ Befehl für diesen Server aktiviert: ${cmdName}`, flags: MessageFlags.Ephemeral });
                 }
             }
