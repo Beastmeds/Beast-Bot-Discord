@@ -24,6 +24,31 @@ const client = new Client({
     ],
 });
 
+// Early guard: block commands that have been disabled via /owner disable (persisted in guild-config.json)
+client.on('interactionCreate', async interaction => {
+    try {
+        if (!interaction.isChatInputCommand()) return;
+        const cmd = interaction.commandName;
+        const cfg = await loadConfig();
+        const gcfg = (interaction.guild && cfg[interaction.guild.id]) ? cfg[interaction.guild.id] : {};
+
+        const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+        const isOwner = owners.has(interaction.user.id);
+
+        const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>String(x).toLowerCase()) : [];
+        if (globalDisabled.includes(String(cmd).toLowerCase()) && !isOwner) {
+            try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+        }
+
+        const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>String(x).toLowerCase()) : [];
+        if (guildDisabled.includes(String(cmd).toLowerCase()) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
+            try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Bitte kontaktiere einen Server-Admin oder Owner. 🔧', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+        }
+    } catch (e) {
+        console.error('disabled guard error', e && e.message);
+    }
+});
+
 // Global guard: block disabled commands early and show a friendly error
 client.on('interactionCreate', async interaction => {
     try {
