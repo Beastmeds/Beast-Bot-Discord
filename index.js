@@ -35,15 +35,20 @@ client.on('interactionCreate', async interaction => {
         const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
         const isOwner = owners.has(interaction.user.id);
 
-        const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>String(x).toLowerCase()) : [];
-            if (globalDisabled.includes(String(cmd).toLowerCase()) && !isOwner) {
-                try { console.log('DEBUG: blocking global disabled cmd', cmd, 'for', interaction.user.tag); } catch(_){}
-                try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
-            }
+        const normalize = s => String(s || '').replace(/^\/*/, '').trim().toLowerCase();
+        const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>normalize(x)) : [];
+        let subName = '';
+        try { subName = interaction.options.getSubcommand(false) || ''; } catch(_) { subName = ''; }
+        const checkNames = [normalize(cmd)];
+        if (subName) checkNames.push(`${normalize(cmd)} ${normalize(subName)}`);
+        if (checkNames.some(n => globalDisabled.includes(n)) && !isOwner) {
+            try { console.log('DEBUG: blocking global disabled cmd', checkNames, 'for', interaction.user.tag); } catch(_){ }
+            try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. 🔒', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+        }
 
-        const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>String(x).toLowerCase()) : [];
-        if (guildDisabled.includes(String(cmd).toLowerCase()) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
-             try { console.log('DEBUG: blocking guild disabled cmd', cmd, 'in guild', interaction.guild?.id, 'for', interaction.user.tag); } catch(_){}
+        const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>normalize(x)) : [];
+        if (checkNames.some(n => guildDisabled.includes(n)) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
+             try { console.log('DEBUG: blocking guild disabled cmd', checkNames, 'in guild', interaction.guild?.id, 'for', interaction.user.tag); } catch(_){ }
              try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Bitte kontaktiere einen Server-Admin oder Owner. 🔧', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
         }
     } catch (e) {
@@ -63,15 +68,19 @@ client.on('interactionCreate', async interaction => {
         const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
         const isOwner = owners.has(interaction.user.id);
 
-        // check global disabled list
-        const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>String(x).toLowerCase()) : [];
-        if (globalDisabled.includes(String(cmd).toLowerCase()) && !isOwner) {
+        // check global and guild-scoped disabled lists (normalize stored values)
+        const normalize = s => String(s || '').replace(/^\/*/, '').trim().toLowerCase();
+        const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>normalize(x)) : [];
+        let subName = '';
+        try { subName = interaction.options.getSubcommand(false) || ''; } catch(_) { subName = ''; }
+        const checkNames = [normalize(cmd)];
+        if (subName) checkNames.push(`${normalize(cmd)} ${normalize(subName)}`);
+        if (checkNames.some(n => globalDisabled.includes(n)) && !isOwner) {
             try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. Bitte wende dich an den Owner.', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
         }
 
-        // check guild-scoped disabled list
-        const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>String(x).toLowerCase()) : [];
-        if (guildDisabled.includes(String(cmd).toLowerCase()) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
+        const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>normalize(x)) : [];
+        if (checkNames.some(n => guildDisabled.includes(n)) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
             try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Kontaktiere einen Server-Admin oder Owner.', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
         }
     } catch (e) {
