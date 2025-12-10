@@ -2283,7 +2283,9 @@ client.on('interactionCreate', async interaction => {
                 return interaction.reply({ content: lines.join('\n') || 'Keine Owner konfiguriert', flags: MessageFlags.Ephemeral });
             }
             if (sub === 'disable') {
-                const cmdName = (interaction.options.getString('cmd') || '').toLowerCase();
+                const raw = (interaction.options.getString('cmd') || '');
+                const normalize = s => String(s || '').replace(/^\/*/, '').trim().toLowerCase();
+                const cmdName = normalize(raw);
                 const scope = interaction.options.getString('scope') || 'global';
                 if (!cmdName) return interaction.reply({ content: 'Bitte gib einen Command-Namen an.', flags: MessageFlags.Ephemeral });
                 if (scope === 'global') {
@@ -2291,7 +2293,7 @@ client.on('interactionCreate', async interaction => {
                     if (!isOwner) return interaction.reply({ content: 'Nur der Bot-Owner darf globale Befehle deaktivieren.', flags: MessageFlags.Ephemeral });
                     cfg._global = cfg._global || {};
                     cfg._global.disabledCommands = cfg._global.disabledCommands || [];
-                    if (!cfg._global.disabledCommands.map(d=>d.toLowerCase()).includes(cmdName)) cfg._global.disabledCommands.push(cmdName);
+                    if (!cfg._global.disabledCommands.map(d=>normalize(d)).includes(cmdName)) cfg._global.disabledCommands.push(cmdName);
                     await saveConfig(cfg);
                     console.log(`Global command disabled: ${cmdName} by ${interaction.user.tag}`);
                     // debug log written to console and persisted
@@ -2302,7 +2304,7 @@ client.on('interactionCreate', async interaction => {
                     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Du brauchst die Berechtigung "Server verwalten" oder musst Owner sein.', flags: MessageFlags.Ephemeral });
                     cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
                     cfg[interaction.guild.id].disabledCommands = cfg[interaction.guild.id].disabledCommands || [];
-                    if (!cfg[interaction.guild.id].disabledCommands.map(d=>d.toLowerCase()).includes(cmdName)) cfg[interaction.guild.id].disabledCommands.push(cmdName);
+                    if (!cfg[interaction.guild.id].disabledCommands.map(d=>normalize(d)).includes(cmdName)) cfg[interaction.guild.id].disabledCommands.push(cmdName);
                     await saveConfig(cfg);
                     console.log(`Guild command disabled: ${cmdName} in ${interaction.guild.id} by ${interaction.user.tag}`);
                     try { console.log('DEBUG: saved cfg[gid].disabledCommands =', cfg[interaction.guild.id].disabledCommands); } catch(_){}
@@ -2310,14 +2312,16 @@ client.on('interactionCreate', async interaction => {
                 }
             }
             if (sub === 'enable') {
-                const cmdName = (interaction.options.getString('cmd') || '').toLowerCase();
+                const raw = (interaction.options.getString('cmd') || '');
+                const normalize = s => String(s || '').replace(/^\/*/, '').trim().toLowerCase();
+                const cmdName = normalize(raw);
                 const scope = interaction.options.getString('scope') || 'global';
                 if (!cmdName) return interaction.reply({ content: 'Bitte gib einen Command-Namen an.', flags: MessageFlags.Ephemeral });
                 if (scope === 'global') {
                     if (!isOwner) return interaction.reply({ content: 'Nur der Bot-Owner darf globale Befehle aktivieren.', flags: MessageFlags.Ephemeral });
                     cfg._global = cfg._global || {};
                     cfg._global.disabledCommands = cfg._global.disabledCommands || [];
-                    cfg._global.disabledCommands = cfg._global.disabledCommands.filter(x => (x || '').toLowerCase() !== cmdName);
+                    cfg._global.disabledCommands = cfg._global.disabledCommands.filter(x => String(x || '').replace(/^\/*/, '').trim().toLowerCase() !== cmdName);
                     await saveConfig(cfg);
                     console.log(`Global command enabled: ${cmdName} by ${interaction.user.tag}`);
                     try { console.log('DEBUG: saved cfg._global.disabledCommands after enable =', cfg._global.disabledCommands); } catch(_){}
@@ -2326,7 +2330,7 @@ client.on('interactionCreate', async interaction => {
                     if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Du brauchst die Berechtigung "Server verwalten" oder musst Owner sein.', flags: MessageFlags.Ephemeral });
                     cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
                     cfg[interaction.guild.id].disabledCommands = cfg[interaction.guild.id].disabledCommands || [];
-                    cfg[interaction.guild.id].disabledCommands = cfg[interaction.guild.id].disabledCommands.filter(x => (x || '').toLowerCase() !== cmdName);
+                    cfg[interaction.guild.id].disabledCommands = cfg[interaction.guild.id].disabledCommands.filter(x => String(x || '').replace(/^\/*/, '').trim().toLowerCase() !== cmdName);
                     await saveConfig(cfg);
                     console.log(`Guild command enabled: ${cmdName} in ${interaction.guild.id} by ${interaction.user.tag}`);
                     try { console.log('DEBUG: saved cfg[gid].disabledCommands after enable =', cfg[interaction.guild.id].disabledCommands); } catch(_){}
