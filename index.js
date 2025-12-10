@@ -24,6 +24,34 @@ const client = new Client({
     ],
 });
 
+// Global guard: block disabled commands early and show a friendly error
+client.on('interactionCreate', async interaction => {
+    try {
+        if (!interaction.isChatInputCommand()) return;
+        const cmd = interaction.commandName;
+        const cfg = await loadConfig();
+        const gcfg = (interaction.guild && cfg[interaction.guild.id]) ? cfg[interaction.guild.id] : {};
+
+        // gather owners (owners bypass disables)
+        const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+        const isOwner = owners.has(interaction.user.id);
+
+        // check global disabled list
+        const globalDisabled = (cfg._global && Array.isArray(cfg._global.disabledCommands)) ? cfg._global.disabledCommands.map(x=>String(x).toLowerCase()) : [];
+        if (globalDisabled.includes(String(cmd).toLowerCase()) && !isOwner) {
+            try { return interaction.reply({ content: '⛔ Dieser Befehl ist momentan deaktiviert — vom Owner gesperrt. Bitte wende dich an den Owner.', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+        }
+
+        // check guild-scoped disabled list
+        const guildDisabled = (gcfg && Array.isArray(gcfg.disabledCommands)) ? gcfg.disabledCommands.map(x=>String(x).toLowerCase()) : [];
+        if (guildDisabled.includes(String(cmd).toLowerCase()) && !isOwner && !(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.ManageGuild))) {
+            try { return interaction.reply({ content: '⚠️ Dieser Befehl wurde für diesen Server deaktiviert. Kontaktiere einen Server-Admin oder Owner.', flags: MessageFlags.Ephemeral }); } catch(_) { return; }
+        }
+    } catch (e) {
+        console.error('disabled-guard error', e && e.message);
+    }
+});
+
     // Animated /hack handler: edits reply progressively to look "cool"
     client.on('interactionCreate', async interaction => {
         if (!interaction.isChatInputCommand()) return;
@@ -1007,6 +1035,13 @@ const commands = [
     {
         name: 'list-guilds',
         description: 'Zeigt dem Bot-Owner alle Gilden, in denen der Bot ist, inkl. (wenn möglich) Invite-Links'
+    },
+    {
+        name: 'ownertodo',
+        description: 'Sende eine Nachricht privat an den Bot-Owner (nur Owner darf den Befehl nutzen)',
+        options: [
+            { name: 'note', description: 'Die Nachricht für den Owner', type: 3, required: true }
+        ]
     },
 
     {
@@ -3671,6 +3706,48 @@ client.on('guildMemberAdd', async member => {
             console.error('list-guilds error', e);
             try { await interaction.editReply({ content: 'Fehler beim Abrufen der Gilden: ' + (e.message || String(e)) }); } catch(_){}
         }
+    });
+
+    // Owner-only: send a private note to the configured owner(s)
+    client.on('interactionCreate', async interaction => {
+        if (!interaction.isChatInputCommand()) return;
+        if (interaction.__blocked) return;
+        if (interaction.commandName !== 'ownertodo') return;
+
+        const cfg = await loadConfig();
+        const owners = new Set();
+        if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+        if (cfg.ownerId) owners.add(cfg.ownerId);
+        if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+        if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+
+        if (!owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur der Bot-Owner kann diesen Befehl ausführen.', flags: MessageFlags.Ephemeral });
+
+        const note = interaction.options.getString('note');
+        if (!note) return interaction.reply({ content: 'Bitte gib eine Nachricht an.', flags: MessageFlags.Ephemeral });
+
+        await interaction.deferReply({ ephemeral: true });
+
+        // Send DM to each configured owner; collect results
+        const results = [];
+        for (const oid of owners) {
+            try {
+                const user = await client.users.fetch(oid).catch(() => null);
+                if (!user) {
+                    results.push(`${oid}: not found`);
+                    continue;
+                }
+                const dmText = `Neue Owner-Todo von ${interaction.user.tag} (${interaction.user.id}) in Guild ${interaction.guild ? `${interaction.guild.name} (${interaction.guild.id})` : 'DM'}:\n\n${note}`;
+                await user.send({ content: dmText }).catch(e => { throw e; });
+                results.push(`${user.tag}: gesendet`);
+            } catch (e) {
+                console.error('ownertodo send error to', oid, e);
+                results.push(`${oid}: fehler (${e && e.message ? e.message : 'unknown'})`);
+            }
+        }
+
+        const out = results.join('\n');
+        try { await interaction.editReply({ content: `Owner-Message gesendet. Ergebnisse:\n${out}` }); } catch (e) { try { await interaction.followUp({ content: `Owner-Message Ergebnisse:\n${out}`, ephemeral: true }); } catch(_){} }
     });
 
     // Ensure /hack is handled: edits reply progressively (robust fallback)
