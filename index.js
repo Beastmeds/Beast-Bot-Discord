@@ -1488,8 +1488,29 @@ async function startNextInGuild(channel, guildId) {
     state.current.filePath = tmpPath;
 
     try {
+        // resolve URL: if the queued item isn't a direct URL, try searching for it
+        let playUrl = next.url;
+        try {
+            if (!/^https?:\/\//i.test(String(playUrl || ''))) {
+                const sres = await play.search(String(playUrl || ''), { limit: 1 }).catch(() => []);
+                if (sres && sres.length && (sres[0].url || sres[0].link)) {
+                    playUrl = sres[0].url || sres[0].link;
+                } else {
+                    throw new Error('Keine abspielbare URL gefunden');
+                }
+            }
+        } catch (resolveErr) {
+            console.error('resolve play url error', resolveErr && resolveErr.message);
+            await channel.send(`❗ Fehler: Kann Titel "${next.title || next.url}" nicht auflösen: ${resolveErr.message || String(resolveErr)}`);
+            // try next track
+            state.playing = false;
+            state.current = null;
+            if (!state.paused && state.queue.length > 0) setTimeout(() => startNextInGuild(channel, guildId).catch(e => console.error('startNext after resolve error', e)), 300);
+            return;
+        }
+
         // get stream via play-dl
-        const streamInfo = await play.stream(next.url).catch(err => { throw err; });
+        const streamInfo = await play.stream(playUrl).catch(err => { throw err; });
         state.current.stream = streamInfo.stream;
         const outStream = fsSync.createWriteStream(tmpPath);
         state.current.writeStream = outStream;
@@ -4551,6 +4572,11 @@ client.on('guildMemberAdd', async member => {
             const version = process.version;
 
             // load guild config to show streamer info if available
+            // music placeholders (declare before use to avoid TDZ / ReferenceError)
+            let musicStatus = 'Idle';
+            let musicNow = '—';
+            let musicQueue = 0;
+            let musicVolume = 100;
             let streamerCount = 0;
             let autoUpdateCount = 0;
             try {
@@ -4575,11 +4601,7 @@ client.on('guildMemberAdd', async member => {
             } catch (e) {
                 console.warn('info: failed to load streamer stats', e && e.message);
             }
-            // music placeholders (in case loadConfig failed above)
-            let musicStatus = typeof musicStatus !== 'undefined' ? musicStatus : 'Idle';
-            let musicNow = typeof musicNow !== 'undefined' ? musicNow : '—';
-            let musicQueue = typeof musicQueue !== 'undefined' ? musicQueue : 0;
-            let musicVolume = typeof musicVolume !== 'undefined' ? musicVolume : 100;
+            // (music variables declared earlier)
 
             const infoEmbed = {
                 title: '🤖 Beast Bot - Informationen',
