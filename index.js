@@ -4048,16 +4048,32 @@ client.on('guildMemberAdd', async member => {
                     const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
                     const playdl = await import('play-dl');
 
-                    let url = null;
-                    let videoTitle = null;
-                    let videoDuration = null;
                     let stream = null;
+                    let videoTitle = 'Audio';
+                    let videoDuration = 0;
 
                     const isUrl = query.startsWith('http://') || query.startsWith('https://');
 
                     if (isUrl) {
-                        // Direct URL
-                        url = query;
+                        // Direct URL - validate and stream
+                        try {
+                            console.log(`📍 Validating URL: ${query}`);
+                            const isValid = await playdl.default.validate(query);
+                            
+                            if (!isValid) {
+                                return interaction.editReply(`❌ URL ist ungültig oder nicht unterstützt.`);
+                            }
+
+                            console.log(`🎵 Streaming URL: ${query}`);
+                            const streamResult = await playdl.default.stream(query);
+                            stream = streamResult.stream;
+                            videoTitle = streamResult.info?.videoDetails?.title || streamResult.info?.title || query;
+                            videoDuration = streamResult.info?.videoDetails?.lengthSeconds || 0;
+
+                        } catch (e) {
+                            console.error('URL stream error:', e.message);
+                            return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
+                        }
                     } else {
                         // Search for song
                         try {
@@ -4068,28 +4084,23 @@ client.on('guildMemberAdd', async member => {
                                 return interaction.editReply(`❌ Kein Lied gefunden für: **${query}**`);
                             }
 
-                            url = results[0].url;
-                            videoTitle = results[0].title || null;
-                            videoDuration = results[0].durationMs ? Math.floor(results[0].durationMs / 1000) : null;
-                            console.log(`✅ Found: ${videoTitle} (${url})`);
+                            const result = results[0];
+                            console.log(`✅ Found: ${result.title} (${result.url})`);
+                            
+                            // Get stream
+                            const streamResult = await playdl.default.stream(result.url);
+                            stream = streamResult.stream;
+                            videoTitle = result.title || 'Audio';
+                            videoDuration = result.durationMs ? Math.floor(result.durationMs / 1000) : 0;
+
                         } catch (e) {
                             console.error('Search error:', e.message);
                             return interaction.editReply(`❌ Fehler bei der Suche:\n\`\`\`${e.message}\`\`\``);
                         }
                     }
 
-                    // Get stream from play-dl
-                    try {
-                        console.log(`🎵 Getting stream for: ${url}`);
-                        stream = await playdl.default.stream(url);
-                        console.log(`✅ Stream ready`);
-                    } catch (e) {
-                        console.error('Stream error:', e.message);
-                        return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
-                    }
-
                     if (!stream) {
-                        return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen. Video möglicherweise blockiert.');
+                        return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen.');
                     }
 
                     // Connect to voice channel
@@ -4103,21 +4114,20 @@ client.on('guildMemberAdd', async member => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
-                    // Title and duration
-                    const title = videoTitle || 'Audio';
+                    // Format duration
                     const durationStr = videoDuration ? `${Math.floor(videoDuration / 60)}:${(videoDuration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
 
                     // Create and play resource
                     try {
                         const resource = createAudioResource(stream, {
                             inputType: StreamType.Arbitrary,
-                            metadata: { title, duration: videoDuration }
+                            metadata: { title: videoTitle, duration: videoDuration }
                         });
 
                         player.play(resource);
 
                         await interaction.editReply(
-                            `🎵 **${title}**\n` +
+                            `🎵 **${videoTitle}**\n` +
                             `⏱️ Dauer: ${durationStr}\n` +
                             `🔊 Lautstärke: ${volume}%\n\n` +
                             `✅ Wird jetzt abgespielt!`
