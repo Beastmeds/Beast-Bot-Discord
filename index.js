@@ -1301,6 +1301,21 @@ const commands = [
         name: 'info',
         description: 'Zeigt Informationen über den Bot 🤖'
     }
+    ,
+    {
+        name: 'streamer',
+        description: 'Streamer-Überwachung und -Management',
+        options: [
+            { name: 'action', description: 'Aktion', type: 3, required: true, choices: [
+                { name: 'add', value: 'add' }, { name: 'remove', value: 'remove' }, { name: 'notify', value: 'notify' },
+                { name: 'live', value: 'live' }, { name: 'status', value: 'status' }, { name: 'auto-update', value: 'auto-update' },
+                { name: 'preview', value: 'preview' }, { name: 'list', value: 'list' }, { name: 'links', value: 'links' }, { name: 'stats', value: 'stats' }
+            ] },
+            { name: 'name', description: 'Twitch-Name des Streamers', type: 3, required: false },
+            { name: 'channel', description: 'Discord-Channel für Benachrichtigungen', type: 7, required: false },
+            { name: 'mode', description: 'on/off für auto-update', type: 3, required: false, choices: [{ name: 'on', value: 'on' }, { name: 'off', value: 'off' }] }
+        ]
+    }
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -4513,6 +4528,20 @@ client.on('guildMemberAdd', async member => {
             const memory = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
             const version = process.version;
 
+            // load guild config to show streamer info if available
+            let streamerCount = 0;
+            let autoUpdateCount = 0;
+            try {
+                const cfg = await loadConfig();
+                const gcfg = (interaction.guild && cfg[interaction.guild.id]) ? cfg[interaction.guild.id] : {};
+                if (gcfg && Array.isArray(gcfg.streamers)) {
+                    streamerCount = gcfg.streamers.length;
+                    autoUpdateCount = gcfg.streamers.filter(s => s && s.autoUpdate).length;
+                }
+            } catch (e) {
+                console.warn('info: failed to load streamer stats', e && e.message);
+            }
+
             const infoEmbed = {
                 title: '🤖 Beast Bot - Informationen',
                 description: 'Hier sind alle wichtigen Infos über den Bot!',
@@ -4546,6 +4575,11 @@ client.on('guildMemberAdd', async member => {
                     {
                         name: '📚 Discord.js',
                         value: `\`v14\``,
+                        inline: true
+                    },
+                    {
+                        name: '🔴 Streamer',
+                        value: `\`${streamerCount} überwacht (Auto: ${autoUpdateCount})\``,
                         inline: true
                     },
                     {
@@ -4584,6 +4618,190 @@ client.on('guildMemberAdd', async member => {
             });
         }
     });
+
+            // Streamer management commands (/streamer ...)
+            const twitchTokenCache = { token: null, expiresAt: 0 };
+
+            async function getTwitchAppToken(cfg) {
+                if (!cfg || !cfg.twitchClientId || !cfg.twitchClientSecret) return null;
+                const now = Date.now();
+                if (twitchTokenCache.token && twitchTokenCache.expiresAt > now + 5000) return twitchTokenCache.token;
+                try {
+                    const res = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${cfg.twitchClientId}&client_secret=${cfg.twitchClientSecret}&grant_type=client_credentials`, { method: 'POST' });
+                    const data = await res.json();
+                    if (data && data.access_token) {
+                        twitchTokenCache.token = data.access_token;
+                        twitchTokenCache.expiresAt = now + ((data.expires_in || 3600) * 1000);
+                        return twitchTokenCache.token;
+                    }
+                } catch (e) { console.error('getTwitchAppToken error', e); }
+                return null;
+            }
+
+            async function twitchGetUserByLogin(login, cfg) {
+                try {
+                    const token = await getTwitchAppToken(cfg);
+                    if (!token) return null;
+                    const url = `https://api.twitch.tv/helix/users?login=${encodeURIComponent(login)}`;
+                    const r = await fetch(url, { headers: { 'Client-ID': cfg.twitchClientId, Authorization: `Bearer ${token}` } });
+                    const j = await r.json();
+                    return (j && j.data && j.data[0]) ? j.data[0] : null;
+                } catch (e) { console.error('twitchGetUserByLogin error', e); return null; }
+            }
+
+            async function twitchGetStreamByUserId(id, cfg) {
+                try {
+                    const token = await getTwitchAppToken(cfg);
+                    if (!token) return null;
+                    const url = `https://api.twitch.tv/helix/streams?user_id=${encodeURIComponent(id)}`;
+                    const r = await fetch(url, { headers: { 'Client-ID': cfg.twitchClientId, Authorization: `Bearer ${token}` } });
+                    const j = await r.json();
+                    return (j && j.data && j.data[0]) ? j.data[0] : null;
+                } catch (e) { console.error('twitchGetStreamByUserId error', e); return null; }
+            }
+
+            async function twitchGetGameById(id, cfg) {
+                try {
+                    const token = await getTwitchAppToken(cfg);
+                    if (!token) return null;
+                    const url = `https://api.twitch.tv/helix/games?id=${encodeURIComponent(id)}`;
+                    const r = await fetch(url, { headers: { 'Client-ID': cfg.twitchClientId, Authorization: `Bearer ${token}` } });
+                    const j = await r.json();
+                    return (j && j.data && j.data[0]) ? j.data[0] : null;
+                } catch (e) { console.error('twitchGetGameById error', e); return null; }
+            }
+
+            function fmtDuration(startedAt) {
+                try {
+                    const s = Date.parse(startedAt);
+                    const diff = Date.now() - s;
+                    const hrs = Math.floor(diff / 3600000);
+                    const mins = Math.floor((diff % 3600000) / 60000);
+                    const secs = Math.floor((diff % 60000) / 1000);
+                    return `${hrs}h ${mins}m ${secs}s`;
+                } catch (_) { return 'n/a'; }
+            }
+
+            client.on('interactionCreate', async interaction => {
+                try {
+                    if (!interaction.isChatInputCommand()) return;
+                    if (interaction.commandName !== 'streamer') return;
+                    if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+
+                    const cfg = await loadConfig();
+                    const gcfg = cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
+                    gcfg.streamers = gcfg.streamers || [];
+
+                    const action = interaction.options.getString('action');
+                    const name = (interaction.options.getString('name') || '').trim();
+                    const channelOpt = interaction.options.getChannel('channel');
+                    const mode = interaction.options.getString('mode');
+
+                    // helper to find
+                    const findIdx = (n) => gcfg.streamers.findIndex(s => s.login && s.login.toLowerCase() === n.toLowerCase());
+
+                    if (action === 'add') {
+                        if (!name) return interaction.reply({ content: 'Bitte gib den Twitch-Namen an.', flags: MessageFlags.Ephemeral });
+                        if (findIdx(name) !== -1) return interaction.reply({ content: 'Streamer ist bereits überwacht.', flags: MessageFlags.Ephemeral });
+                        gcfg.streamers.push({ login: name, notifyChannelId: channelOpt ? channelOpt.id : interaction.channel.id, autoUpdate: false, links: {}, stats: { liveCount: 0, totalViewers: 0 } });
+                        await saveConfig(cfg);
+                        return interaction.reply({ content: `✅ Streamer **${name}** hinzugefügt. Benachrichtigungen: <#${channelOpt ? channelOpt.id : interaction.channel.id}>`, flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'remove') {
+                        if (!name) return interaction.reply({ content: 'Bitte gib den Twitch-Namen an.', flags: MessageFlags.Ephemeral });
+                        const idx = findIdx(name);
+                        if (idx === -1) return interaction.reply({ content: 'Streamer nicht gefunden.', flags: MessageFlags.Ephemeral });
+                        gcfg.streamers.splice(idx, 1);
+                        await saveConfig(cfg);
+                        return interaction.reply({ content: `🗑️ Streamer **${name}** entfernt.`, flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'notify') {
+                        if (!name || !channelOpt) return interaction.reply({ content: 'Bitte gib Twitch-Namen und Channel an.', flags: MessageFlags.Ephemeral });
+                        const idx = findIdx(name);
+                        if (idx === -1) return interaction.reply({ content: 'Streamer nicht gefunden. Zuerst /streamer add ausführen.', flags: MessageFlags.Ephemeral });
+                        gcfg.streamers[idx].notifyChannelId = channelOpt.id;
+                        await saveConfig(cfg);
+                        return interaction.reply({ content: `🔔 Benachrichtigungs-Channel für **${name}** gesetzt auf <#${channelOpt.id}>.`, flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'list') {
+                        if (!gcfg.streamers || gcfg.streamers.length === 0) return interaction.reply({ content: 'Keine Streamer konfiguriert.', flags: MessageFlags.Ephemeral });
+                        let txt = '**Überwachte Streamer:**\n\n';
+                        gcfg.streamers.forEach(s => { txt += `• **${s.login}** — Notifier: ${s.notifyChannelId ? `<#${s.notifyChannelId}>` : 'kein Channel'} — AutoUpdate: ${s.autoUpdate ? 'on' : 'off'}\n`; });
+                        return interaction.reply({ content: txt, flags: MessageFlags.Ephemeral });
+                    }
+
+                    // actions that query Twitch API require a name
+                    if (!name) return interaction.reply({ content: 'Bitte gib den Twitch-Namen an (option name).', flags: MessageFlags.Ephemeral });
+
+                    const user = await twitchGetUserByLogin(name, cfg[interaction.guild.id] || cfg._global || cfg);
+                    if (!user) return interaction.reply({ content: `Streamer **${name}** nicht gefunden auf Twitch.`, flags: MessageFlags.Ephemeral });
+
+                    if (action === 'live') {
+                        const stream = await twitchGetStreamByUserId(user.id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        if (!stream) return interaction.reply({ content: `❌ **${user.login}** ist derzeit nicht live.`, flags: MessageFlags.Ephemeral });
+                        const game = await twitchGetGameById(stream.game_id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        return interaction.reply({ content: `✅ **${user.login}** ist live!\nTitle: ${stream.title}\nGame: ${game ? game.name : 'Unknown'}\nViewers: ${stream.viewer_count}`, flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'status') {
+                        const stream = await twitchGetStreamByUserId(user.id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        if (!stream) return interaction.reply({ content: `❌ **${user.login}** ist derzeit nicht live.`, flags: MessageFlags.Ephemeral });
+                        const game = await twitchGetGameById(stream.game_id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        const duration = fmtDuration(stream.started_at);
+                        const thumb = (stream.thumbnail_url || '').replace('{width}', '1280').replace('{height}', '720');
+                        const out = `📺 **${user.login}** ist live!\nTitle: ${stream.title}\nGame: ${game ? game.name : 'Unknown'}\nViewers: ${stream.viewer_count}\nDauer: ${duration}\nThumbnail: ${thumb}`;
+                        return interaction.reply({ content: out, flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'preview') {
+                        const stream = await twitchGetStreamByUserId(user.id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        if (!stream) return interaction.reply({ content: `❌ **${user.login}** ist derzeit nicht live.`, flags: MessageFlags.Ephemeral });
+                        const thumb = (stream.thumbnail_url || '').replace('{width}', '1280').replace('{height}', '720');
+                        try {
+                            await interaction.reply({ content: `Preview für **${user.login}**`, files: [thumb], flags: MessageFlags.Ephemeral });
+                        } catch (e) {
+                            return interaction.reply({ content: `Thumbnail: ${thumb}`, flags: MessageFlags.Ephemeral });
+                        }
+                        return;
+                    }
+
+                    if (action === 'auto-update') {
+                        const idx = findIdx(name);
+                        if (idx === -1) return interaction.reply({ content: 'Streamer nicht gefunden.', flags: MessageFlags.Ephemeral });
+                        const on = (mode === 'on');
+                        gcfg.streamers[idx].autoUpdate = on;
+                        await saveConfig(cfg);
+                        return interaction.reply({ content: `🔁 Auto-Update für **${name}** gesetzt auf ${on ? 'on' : 'off'}.`, flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'links') {
+                        const s = gcfg.streamers.find(s => s.login.toLowerCase() === name.toLowerCase());
+                        if (!s) return interaction.reply({ content: 'Streamer nicht gefunden.', flags: MessageFlags.Ephemeral });
+                        const links = [];
+                        links.push(`Twitch: https://twitch.tv/${s.login}`);
+                        if (s.links && s.links.youtube) links.push(`YouTube: ${s.links.youtube}`);
+                        if (s.links && s.links.tiktok) links.push(`TikTok: ${s.links.tiktok}`);
+                        if (s.links && s.links.discord) links.push(`Discord: ${s.links.discord}`);
+                        return interaction.reply({ content: links.join('\n'), flags: MessageFlags.Ephemeral });
+                    }
+
+                    if (action === 'stats') {
+                        const s = gcfg.streamers.find(s => s.login.toLowerCase() === name.toLowerCase());
+                        if (!s) return interaction.reply({ content: 'Streamer nicht gefunden.', flags: MessageFlags.Ephemeral });
+                        const st = s.stats || {};
+                        return interaction.reply({ content: `📊 Stats für **${s.login}**:\nLive-Starts: ${st.liveCount || 0}\nDurchschn. Zuschauer: ${st.avgViewers || 'n/a'}\nMeistgespieltes Game: ${st.topGame || 'n/a'}`, flags: MessageFlags.Ephemeral });
+                    }
+
+                    return interaction.reply({ content: 'Unbekannte Aktion.', flags: MessageFlags.Ephemeral });
+
+                } catch (e) {
+                    console.error('streamer handler error', e && (e.stack || e));
+                    try { if (!interaction.replied) await interaction.reply({ content: 'Fehler beim Ausführen des Streamer-Befehls.', flags: MessageFlags.Ephemeral }); } catch(_){}
+                }
+            });
 
     // Add error handling for login
     client.on('ready', () => {
