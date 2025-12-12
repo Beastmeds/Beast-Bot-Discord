@@ -4089,19 +4089,44 @@ client.on('guildMemberAdd', async member => {
                                     }
                                 })();
 
-                                try {
+                                    try {
                                     console.log(`🔁 Falling back to search for: ${fallbackQuery}`);
                                     const results = await playdl.default.search(fallbackQuery, { limit: 1 });
                                     if (!results || results.length === 0) {
                                         throw new Error('Kein Ergebnis beim Fallback-Search');
                                     }
                                     const r = results[0];
-                                    console.log('-> Fallback search result:', r.url);
-                                    const fallbackStream = await playdl.default.stream(r.url);
-                                    stream = fallbackStream.stream;
-                                    videoTitle = r.title || fallbackStream.info?.videoDetails?.title || videoTitle;
-                                    videoDuration = r.durationMs ? Math.floor(r.durationMs / 1000) : fallbackStream.info?.videoDetails?.lengthSeconds || videoDuration;
-                                    console.log('-> fallback stream succeeded');
+                                    console.log('-> Fallback search result:', r.url, 'id:', r.id || r.videoId || null);
+
+                                    // Try streaming the result.url first
+                                    try {
+                                        const fallbackStream = await playdl.default.stream(r.url);
+                                        stream = fallbackStream.stream;
+                                        videoTitle = r.title || fallbackStream.info?.videoDetails?.title || videoTitle;
+                                        videoDuration = r.durationMs ? Math.floor(r.durationMs / 1000) : fallbackStream.info?.videoDetails?.lengthSeconds || videoDuration;
+                                        console.log('-> fallback stream succeeded (result.url)');
+                                    } catch (streamErr) {
+                                        console.warn('fallback stream from result.url failed:', streamErr.message);
+                                        // If result.url looks like an id or is missing, try to construct watch URL from id
+                                        const vid = r.id || r.videoId || (typeof r === 'string' ? r : null);
+                                        if (vid) {
+                                            const watchUrl = `https://www.youtube.com/watch?v=${vid}`;
+                                            try {
+                                                console.log('-> Trying constructed watch URL:', watchUrl);
+                                                const fallbackStream2 = await playdl.default.stream(watchUrl);
+                                                stream = fallbackStream2.stream;
+                                                videoTitle = r.title || fallbackStream2.info?.videoDetails?.title || videoTitle;
+                                                videoDuration = r.durationMs ? Math.floor(r.durationMs / 1000) : fallbackStream2.info?.videoDetails?.lengthSeconds || videoDuration;
+                                                console.log('-> fallback stream succeeded (constructed watch URL)');
+                                            } catch (watchErr) {
+                                                console.error('constructed watchUrl stream failed:', watchErr.message);
+                                                throw watchErr;
+                                            }
+                                        } else {
+                                            throw streamErr;
+                                        }
+                                    }
+
                                 } catch (err) {
                                     console.error('URL fallback error:', err.message);
                                     console.error(err.stack);
