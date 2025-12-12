@@ -4042,70 +4042,90 @@ client.on('guildMemberAdd', async member => {
                     return interaction.editReply('❌ Der konfigurierte Voice-Channel existiert nicht mehr. Erstelle einen neuen mit `/voice`.');
                 }
 
-                // Initialize discord-player if not already done
-                const { Player } = await import('discord-player');
-                if (!client.player) {
-                    client.player = new Player(client, {
-                        ytdlOptions: {
-                            quality: 'highestaudio',
-                            highWaterMark: 1 << 25
-                        }
-                    });
-                }
+                await interaction.editReply('🔄 Suche und lade Musik...');
 
                 try {
-                    await interaction.editReply('🔄 Suche und lade Musik...');
-                    
-                    // Search for the track
-                    const searchResult = await client.player.search(url, {
-                        requestedBy: interaction.user
-                    }).catch(e => {
-                        console.error('Search error:', e);
-                        return null;
-                    });
+                    const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
+                    const ytdlp = await import('@distube/yt-dlp');
 
-                    if (!searchResult || !searchResult.hasTracks()) {
-                        return interaction.editReply('❌ Keine Musik gefunden. Überprüfe die URL oder den Suchbegriff.');
-                    }
+                    // Get stream from yt-dlp
+                    let stream = null;
+                    let info = null;
 
-                    const track = searchResult.tracks[0];
-                    
-                    // Get or create subscription
-                    let subscription = client.player.nodes.get(interaction.guild.id);
-                    
-                    if (!subscription) {
-                        subscription = await client.player.nodes.create(interaction.guild, {
-                            metadata: {
-                                channel: interaction.channel
-                            },
-                            leaveOnEmpty: true,
-                            leaveOnEmptyCooldown: 300000,
-                            leaveOnEnd: true,
-                            leaveOnEndCooldown: 300000
+                    try {
+                        const yt = new ytdlp.default();
+                        info = await yt.getInfo(url).catch(e => {
+                            console.warn('getInfo failed, trying getBasicInfo:', e.message);
+                            return null;
                         });
+
+                        if (!info) {
+                            return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
+                        }
+
+                        stream = await yt.stream(url).catch(e => {
+                            console.error('Stream error:', e);
+                            return null;
+                        });
+
+                        if (!stream) {
+                            return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen. Video möglicherweise blockiert.');
+                        }
+
+                    } catch (e) {
+                        console.error('yt-dlp error:', e.message);
+                        return interaction.editReply(`❌ Fehler beim Laden der Musik:\n\`\`\`${e.message}\`\`\``);
                     }
 
                     // Connect to voice channel
-                    if (!subscription.connection) {
-                        subscription.setChannel(voiceChannel);
+                    const connection = joinVoiceChannel({
+                        channelId: voiceChannel.id,
+                        guildId: voiceChannel.guild.id,
+                        adapterCreator: voiceChannel.guild.voiceAdapterCreator
+                    });
+
+                    // Create player
+                    const player = createAudioPlayer();
+                    connection.subscribe(player);
+
+                    // Get title and duration
+                    const title = info?.videoDetails?.title || info?.title || 'Audio';
+                    const duration = info?.videoDetails?.lengthSeconds || info?.duration || 0;
+                    const durationStr = duration ? `${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
+
+                    // Create and play resource
+                    try {
+                        const resource = createAudioResource(stream, {
+                            inputType: StreamType.Arbitrary,
+                            metadata: { title, duration }
+                        });
+
+                        player.play(resource);
+
+                        await interaction.editReply(
+                            `🎵 **${title}**\n` +
+                            `⏱️ Dauer: ${durationStr}\n` +
+                            `🔊 Lautstärke: ${volume}%\n\n` +
+                            `✅ Wird jetzt abgespielt!`
+                        );
+
+                        // Handle end of stream
+                        player.on(AudioPlayerStatus.Idle, () => {
+                            try { connection.destroy(); } catch (_) {}
+                        });
+
+                        player.on('error', (error) => {
+                            console.error('Player error:', error);
+                        });
+
+                    } catch (e) {
+                        console.error('Resource creation error:', e);
+                        return interaction.editReply(`❌ Fehler beim Abspielen:\n\`\`\`${e.message}\`\`\``);
                     }
 
-                    // Play track
-                    await subscription.node.play(track);
-
-                    const duration = track.duration ? `${Math.floor(track.duration / 1000 / 60)}:${(Math.floor(track.duration / 1000) % 60).toString().padStart(2, '0')}` : 'Unbekannt';
-
-                    await interaction.editReply(
-                        `🎵 **${track.title}**\n` +
-                        `👤 von ${track.author || 'Unbekannt'}\n` +
-                        `⏱️ Dauer: ${duration}\n` +
-                        `🔊 Lautstärke: ${volume}%\n\n` +
-                        `✅ Wird jetzt abgespielt!`
-                    );
-
                 } catch (e) {
-                    console.error('Play error:', e);
-                    return interaction.editReply(`❌ Fehler beim Abspielen:\n\`\`\`${e.message}\`\`\``);
+                    console.error('Voice/Player error:', e);
+                    return interaction.editReply(`❌ Fehler beim Verbinden mit Voice-Channel:\n\`\`\`${e.message}\`\`\``);
                 }
 
             } catch (e) {
