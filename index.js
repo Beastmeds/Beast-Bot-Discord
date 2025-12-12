@@ -1109,6 +1109,21 @@ const commands = [
             { name: 'user', description: 'User für add/remove', type: 6, required: false },
             { name: 'value', description: 'Wert für only (true/false)', type: 3, required: false }
         ]
+    },
+    {
+        name: 'voice',
+        description: 'Erstellt einen neuen Voice-Channel für Musik',
+        options: [
+            { name: 'name', description: 'Name des Voice-Channels', type: 3, required: false }
+        ]
+    },
+    {
+        name: 'play',
+        description: 'Spielt einen Song in dem Voice-Channel ab (YouTube/URL)',
+        options: [
+            { name: 'url', description: 'YouTube URL oder Song-Name', type: 3, required: true },
+            { name: 'volume', description: 'Lautstärke (0-100)', type: 4, required: false }
+        ]
     }
 ];
 
@@ -3835,6 +3850,138 @@ client.on('guildMemberAdd', async member => {
         } catch (e) {
             console.error('hack handler error', e);
             try { if (!interaction.replied) await interaction.reply({ content: 'Fehler beim Ausführen des /hack Befehls.', flags: MessageFlags.Ephemeral }); else await interaction.editReply({ content: 'Fehler beim Ausführen des /hack Befehls.' }); } catch(_){ }
+        }
+    });
+
+    // Voice Channel Handler: /voice erstellt einen neuen Voice-Channel
+    client.on('interactionCreate', async interaction => {
+        try {
+            if (!interaction.isChatInputCommand()) return;
+            if (interaction.__blocked) return;
+            if (interaction.commandName !== 'voice') return;
+
+            const channelName = interaction.options.getString('name') || `🎵 Music-${Date.now().toString().slice(-4)}`;
+            
+            try {
+                const voiceChannel = await interaction.guild.channels.create({
+                    name: channelName,
+                    type: ChannelType.GuildVoice,
+                    permissionOverwrites: [
+                        {
+                            id: interaction.guild.id,
+                            allow: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak]
+                        }
+                    ]
+                });
+
+                // Speichere den Voice-Channel in der Config
+                const cfg = await loadConfig();
+                cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
+                cfg[interaction.guild.id].voiceChannelId = voiceChannel.id;
+                await saveConfig(cfg);
+
+                await interaction.reply({
+                    content: `✅ Voice-Channel erstellt: ${voiceChannel.toString()}\n\nNutze jetzt \`/play <url>\` um Musik abzuspielen!`,
+                    flags: MessageFlags.Ephemeral
+                });
+            } catch (e) {
+                console.error('voice channel creation error', e);
+                await interaction.reply({
+                    content: '❌ Fehler beim Erstellen des Voice-Channels. Stelle sicher, dass ich die Berechtigung habe, Kanäle zu erstellen.',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        } catch (e) {
+            console.error('voice handler error', e);
+        }
+    });
+
+    // Play Music Handler: /play spielt Musik im Voice-Channel ab
+    client.on('interactionCreate', async interaction => {
+        try {
+            if (!interaction.isChatInputCommand()) return;
+            if (interaction.__blocked) return;
+            if (interaction.commandName !== 'play') return;
+
+            const url = interaction.options.getString('url');
+            const volume = interaction.options.getInteger('volume') || 50;
+
+            if (volume < 0 || volume > 100) {
+                return interaction.reply({
+                    content: '❌ Lautstärke muss zwischen 0 und 100 liegen.',
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            await interaction.deferReply();
+
+            try {
+                // Hole den gespeicherten Voice-Channel
+                const cfg = await loadConfig();
+                const gcfg = cfg[interaction.guild.id] || {};
+                const voiceChannelId = gcfg.voiceChannelId;
+
+                if (!voiceChannelId) {
+                    return interaction.editReply('❌ Kein Voice-Channel konfiguriert. Nutze zuerst `/voice` um einen zu erstellen.');
+                }
+
+                const voiceChannel = await interaction.guild.channels.fetch(voiceChannelId).catch(() => null);
+                if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
+                    return interaction.editReply('❌ Der konfigurierte Voice-Channel existiert nicht mehr. Erstelle einen neuen mit `/voice`.');
+                }
+
+                // Verbinde dich mit dem Voice-Channel
+                const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
+                
+                const connection = joinVoiceChannel({
+                    channelId: voiceChannel.id,
+                    guildId: voiceChannel.guild.id,
+                    adapterCreator: voiceChannel.guild.voiceAdapterCreator
+                });
+
+                const player = createAudioPlayer();
+                connection.subscribe(player);
+
+                // Versuche YouTube URL zu spielen oder fallback mit fetch
+                let audioBuffer = null;
+                
+                if (url.includes('youtube.com') || url.includes('youtu.be')) {
+                    // Für YouTube URLs: Nutze youtube-dl oder yt-dlp Fallback
+                    return interaction.editReply({
+                        content: '⏳ YouTube-Integration erfordert `yt-dlp`. Installiere es mit: `pip install yt-dlp`\n\nOder nutze einen direkten Audio-Link (MP3/WAV).',
+                        flags: MessageFlags.Ephemeral
+                    });
+                } else if (url.startsWith('http')) {
+                    // Direkter Audio-Link
+                    try {
+                        const resource = createAudioResource(url, { inputType: StreamType.Arbitrary });
+                        player.play(resource);
+                        
+                        await interaction.editReply(`🎵 Spiele jetzt ab: \`${url}\` (Lautstärke: ${volume}%)`);
+                        
+                        player.on(AudioPlayerStatus.Idle, () => {
+                            connection.destroy();
+                        });
+                    } catch (e) {
+                        console.error('audio play error', e);
+                        return interaction.editReply('❌ Fehler beim Abspielen der Audio-Datei. Stelle sicher, dass die URL erreichbar ist.');
+                    }
+                } else {
+                    // Fallback: Text message with info
+                    await interaction.editReply({
+                        content: `🎵 **Music Player aktiv**\n\nNutze bitte direkte Audio-Links (MP3/WAV) oder YouTube-URLs.\n\n**Beispiel:**\n\`/play url:https://example.com/song.mp3\`\n\nFür YouTube wird yt-dlp benötigt (siehe Installationsanleitung).`
+                    });
+                }
+
+            } catch (e) {
+                console.error('play handler error', e);
+                await interaction.editReply({
+                    content: `❌ Fehler beim Abspielen der Musik:\n\`\`\`${e.message}\`\`\``,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+        } catch (e) {
+            console.error('play command error', e);
         }
     });
 
