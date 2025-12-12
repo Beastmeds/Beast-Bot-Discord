@@ -1,0 +1,29 @@
+    },
+    {
+        name: 'streamer',
+        description: 'Streamer-Überwachung und -Management',
+        options: [
+            {
+                name: 'action',
+                description: 'Aktion',
+                type: 3,
+                required: true,
+                choices: [
+                    { name: 'add', value: 'add' },
+                    { name: 'remove', value: 'remove' },
+                    { name: 'notify', value: 'notify' },
+                    { name: 'live', value: 'live' },
+                    { name: 'status', value: 'status' },
+                    { name: 'auto-update', value: 'auto-update' },
+                    { name: 'preview', value: 'preview' },
+                    { name: 'list', value: 'list' },
+                    { name: 'links', value: 'links' },
+                    { name: 'stats', value: 'stats' }
+                ]
+            },
+            { name: 'name', description: 'Twitch-Name des Streamers', type: 3, required: false },
+            { name: 'channel', description: 'Discord-Channel für Benachrichtigungen', type: 7, required: false },
+            { name: 'mode', description: 'on/off für auto-update', type: 3, required: false, choices: [{ name: 'on', value: 'on' }, { name: 'off', value: 'off' }] }
+        ]
+    }
+];
