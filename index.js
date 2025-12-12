@@ -4042,97 +4042,74 @@ client.on('guildMemberAdd', async member => {
                     return interaction.editReply('❌ Der konfigurierte Voice-Channel existiert nicht mehr. Erstelle einen neuen mit `/voice`.');
                 }
 
-                // Verbinde dich mit dem Voice-Channel
-                const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
-                
-                const connection = joinVoiceChannel({
-                    channelId: voiceChannel.id,
-                    guildId: voiceChannel.guild.id,
-                    adapterCreator: voiceChannel.guild.voiceAdapterCreator
-                });
-
-                const player = createAudioPlayer();
-                connection.subscribe(player);
-
-                // Handle YouTube URLs
-                if (url.includes('youtube.com') || url.includes('youtu.be')) {
-                    try {
-                        await interaction.editReply('🔄 Lade YouTube Video...');
-                        
-                        const ytdl = await import('ytdl-core');
-                        const youtube = ytdl.default;
-                        
-                        // Versuche das Video-Info zu holen
-                        let info = null;
-                        try {
-                            info = await youtube.getInfo(url);
-                        } catch (e) {
-                            console.warn('ytdl getInfo failed, trying getBasicInfo:', e.message);
-                            try {
-                                info = await youtube.getBasicInfo(url);
-                            } catch (e2) {
-                                console.error('Both getInfo and getBasicInfo failed:', e2);
-                                return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
-                            }
-                        }
-
-                        const title = info.videoDetails?.title || 'YouTube Video';
-                        const duration = info.videoDetails?.lengthSeconds ? `${Math.floor(info.videoDetails.lengthSeconds / 60)}:${(info.videoDetails.lengthSeconds % 60).toString().padStart(2, '0')}` : 'Unbekannt';
-
-                        // Get the audio stream
-                        const stream = youtube(url, {
+                // Initialize discord-player if not already done
+                const { Player } = await import('discord-player');
+                if (!client.player) {
+                    client.player = new Player(client, {
+                        ytdlOptions: {
                             quality: 'highestaudio',
-                            filter: 'audioonly'
-                        });
-
-                        const resource = createAudioResource(stream, {
-                            inputType: StreamType.Arbitrary,
-                            metadata: {
-                                title: title,
-                                duration: duration
-                            }
-                        });
-
-                        player.play(resource);
-                        
-                        await interaction.editReply(`🎵 **Jetzt abspielend:** ${title}\n⏱️ Dauer: ${duration}\n🔊 Lautstärke: ${volume}%`);
-                        
-                        stream.on('error', (error) => {
-                            console.error('Stream error:', error);
-                        });
-
-                        player.on(AudioPlayerStatus.Idle, () => {
-                            try { connection.destroy(); } catch(_){}
-                        });
-
-                        player.on('error', (error) => {
-                            console.error('Player error:', error);
-                        });
-
-                    } catch (e) {
-                        console.error('YouTube play error', e);
-                        return interaction.editReply(`❌ Fehler beim Abspielen von YouTube:\n\`\`\`${e.message}\`\`\``);
-                    }
-                } else if (url.startsWith('http')) {
-                    // Direkter Audio-Link (MP3, WAV, etc.)
-                    try {
-                        const resource = createAudioResource(url, { inputType: StreamType.Arbitrary });
-                        player.play(resource);
-                        
-                        await interaction.editReply(`🎵 Spiele jetzt ab: \`${url.substring(0, 50)}...\` (Lautstärke: ${volume}%)`);
-                        
-                        player.on(AudioPlayerStatus.Idle, () => {
-                            connection.destroy();
-                        });
-                    } catch (e) {
-                        console.error('audio play error', e);
-                        return interaction.editReply('❌ Fehler beim Abspielen der Audio-Datei. Stelle sicher, dass die URL erreichbar ist.');
-                    }
-                } else {
-                    // Fallback: Info message
-                    await interaction.editReply({
-                        content: `🎵 **Music Player**\n\n**Unterstützte Formate:**\n• YouTube URLs (youtube.com oder youtu.be)\n• Direkte Audio-Links (MP3, WAV, etc.)\n\n**Beispiele:**\n\`/play url:https://www.youtube.com/watch?v=...\`\n\`/play url:https://example.com/song.mp3\``
+                            highWaterMark: 1 << 25
+                        }
                     });
+                    
+                    // Event listeners
+                    client.player.on('error', (queue, error) => {
+                        console.error('Player Queue error:', error);
+                    });
+                    
+                    client.player.on('playerError', (queue, error) => {
+                        console.error('Player error:', error);
+                    });
+                }
+
+                // Get or create queue
+                let queue = client.player.queues.get(interaction.guild.id);
+                
+                if (!queue) {
+                    queue = client.player.createQueue(interaction.guild, {
+                        metadata: {
+                            channel: interaction.channel
+                        },
+                        volumeSmoothness: 0.1
+                    });
+                }
+
+                // Connect to voice channel
+                if (!queue.connection) {
+                    await queue.connect(voiceChannel);
+                }
+
+                // Search and play
+                try {
+                    await interaction.editReply('🔄 Suche und lade...');
+                    
+                    const result = await client.player.search(url, {
+                        requestedBy: interaction.user
+                    });
+
+                    if (!result.tracks.length) {
+                        return interaction.editReply('❌ Keine Musik gefunden. Überprüfe die URL oder den Suchbegriff.');
+                    }
+
+                    const track = result.tracks[0];
+                    queue.addTrack(track);
+
+                    // Play if nothing is playing
+                    if (!queue.playing) {
+                        await queue.play();
+                    }
+
+                    await interaction.editReply(
+                        `🎵 **${track.title}**\n` +
+                        `👤 von ${track.author}\n` +
+                        `⏱️ Dauer: ${track.duration}\n` +
+                        `🔊 Lautstärke: ${volume}%\n\n` +
+                        (queue.tracks.length > 0 ? `📋 ${queue.tracks.length} weitere Songs in der Queue` : '✅ Wird jetzt abgespielt!')
+                    );
+
+                } catch (e) {
+                    console.error('Search/play error:', e);
+                    return interaction.editReply(`❌ Fehler beim Abspielen:\n\`\`\`${e.message}\`\`\``);
                 }
 
             } catch (e) {
