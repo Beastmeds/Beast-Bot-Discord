@@ -4059,42 +4059,54 @@ client.on('guildMemberAdd', async member => {
                     try {
                         await interaction.editReply('🔄 Lade YouTube Video...');
                         
-                        const play = await import('play-dl');
+                        const ytdl = await import('ytdl-core');
+                        const youtube = ytdl.default;
                         
-                        // Validate YouTube URL
-                        if (!await play.default.validate(url)) {
-                            return interaction.editReply('❌ Ungültige YouTube URL!');
+                        // Versuche das Video-Info zu holen
+                        let info = null;
+                        try {
+                            info = await youtube.getInfo(url);
+                        } catch (e) {
+                            console.warn('ytdl getInfo failed, trying getBasicInfo:', e.message);
+                            try {
+                                info = await youtube.getBasicInfo(url);
+                            } catch (e2) {
+                                console.error('Both getInfo and getBasicInfo failed:', e2);
+                                return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
+                            }
                         }
 
-                        // Get stream
-                        const stream = await play.default.stream(url);
-                        if (!stream) {
-                            return interaction.editReply('❌ Konnte den Stream nicht abrufen. Video möglicherweise blockiert oder nicht verfügbar.');
-                        }
+                        const title = info.videoDetails?.title || 'YouTube Video';
+                        const duration = info.videoDetails?.lengthSeconds ? `${Math.floor(info.videoDetails.lengthSeconds / 60)}:${(info.videoDetails.lengthSeconds % 60).toString().padStart(2, '0')}` : 'Unbekannt';
 
-                        // Create resource from stream
-                        const resource = createAudioResource(stream.stream, {
-                            inputType: stream.type,
+                        // Get the audio stream
+                        const stream = youtube(url, {
+                            quality: 'highestaudio',
+                            filter: 'audioonly'
+                        });
+
+                        const resource = createAudioResource(stream, {
+                            inputType: StreamType.Arbitrary,
                             metadata: {
-                                title: stream.video_details?.title || 'Unknown',
-                                duration: stream.video_details?.durationInSec || 0
+                                title: title,
+                                duration: duration
                             }
                         });
 
                         player.play(resource);
                         
-                        const title = stream.video_details?.title || 'YouTube Video';
-                        const duration = stream.video_details?.durationInSec ? `${Math.floor(stream.video_details.durationInSec / 60)}:${(stream.video_details.durationInSec % 60).toString().padStart(2, '0')}` : 'Unbekannt';
-                        
                         await interaction.editReply(`🎵 **Jetzt abspielend:** ${title}\n⏱️ Dauer: ${duration}\n🔊 Lautstärke: ${volume}%`);
                         
+                        stream.on('error', (error) => {
+                            console.error('Stream error:', error);
+                        });
+
                         player.on(AudioPlayerStatus.Idle, () => {
                             try { connection.destroy(); } catch(_){}
                         });
 
                         player.on('error', (error) => {
                             console.error('Player error:', error);
-                            try { interaction.followUp({ content: '❌ Fehler beim Abspielen!', flags: MessageFlags.Ephemeral }); } catch(_){}
                         });
 
                     } catch (e) {
@@ -4107,7 +4119,7 @@ client.on('guildMemberAdd', async member => {
                         const resource = createAudioResource(url, { inputType: StreamType.Arbitrary });
                         player.play(resource);
                         
-                        await interaction.editReply(`🎵 Spiele jetzt ab: \`${url}\` (Lautstärke: ${volume}%)`);
+                        await interaction.editReply(`🎵 Spiele jetzt ab: \`${url.substring(0, 50)}...\` (Lautstärke: ${volume}%)`);
                         
                         player.on(AudioPlayerStatus.Idle, () => {
                             connection.destroy();
