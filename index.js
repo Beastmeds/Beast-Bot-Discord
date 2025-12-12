@@ -4046,66 +4046,55 @@ client.on('guildMemberAdd', async member => {
 
                 try {
                     const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
-                    const ytdl = await import('ytdl-core');
                     const playdl = await import('play-dl');
 
-                    // Determine if query is a URL or search term
                     let url = null;
                     let videoTitle = null;
                     let videoDuration = null;
+                    let stream = null;
 
                     const isUrl = query.startsWith('http://') || query.startsWith('https://');
 
                     if (isUrl) {
-                        // Direct URL provided
+                        // Direct URL
                         url = query;
                     } else {
-                        // Search for song on YouTube
+                        // Search for song
                         try {
                             console.log(`🔍 Searching for: ${query}`);
-                            const results = await playdl.default.search(query, { limit: 5 });
+                            const results = await playdl.default.search(query, { limit: 1 });
                             
                             if (!results || results.length === 0) {
                                 return interaction.editReply(`❌ Kein Lied gefunden für: **${query}**`);
                             }
 
-                            console.log(`Found ${results.length} results, using first one:`, results[0].url);
                             url = results[0].url;
                             videoTitle = results[0].title || null;
                             videoDuration = results[0].durationMs ? Math.floor(results[0].durationMs / 1000) : null;
+                            console.log(`✅ Found: ${videoTitle} (${url})`);
                         } catch (e) {
                             console.error('Search error:', e.message);
                             return interaction.editReply(`❌ Fehler bei der Suche:\n\`\`\`${e.message}\`\`\``);
                         }
                     }
 
-                    // Try to get info from ytdl-core
-                    let info = null;
+                    // Get stream from play-dl
                     try {
-                        console.log(`Getting info for URL: ${url}`);
-                        info = await ytdl.default.getInfo(url);
-                        console.log('Info fetched successfully');
-                    } catch (e) {
-                        console.warn('ytdl getInfo failed, will use search results:', e.message);
-                    }
-
-                    // Extract title and duration
-                    const title = videoTitle || info?.videoDetails?.title || 'Audio';
-                    const duration = videoDuration || info?.videoDetails?.lengthSeconds || 0;
-                    const durationStr = duration ? `${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
-
-                    // Create stream with audio format
-                    let stream = null;
-                    try {
-                        console.log(`Creating stream for: ${url}`);
-                        stream = ytdl.default(url, {
-                            quality: 'highestaudio',
-                            highWaterMark: 1 << 25
-                        });
-                        console.log('Stream created');
+                        console.log(`🎵 Getting stream for: ${url}`);
+                        const info = await playdl.default.getInfo(url);
+                        stream = await playdl.default.stream(url);
+                        
+                        if (!videoTitle) {
+                            videoTitle = info?.videoDetails?.title || info?.title || 'Audio';
+                        }
+                        if (!videoDuration) {
+                            videoDuration = info?.videoDetails?.lengthSeconds || info?.duration || 0;
+                        }
+                        
+                        console.log(`✅ Stream ready: ${videoTitle}`);
                     } catch (e) {
                         console.error('Stream error:', e.message);
-                        return interaction.editReply(`❌ Konnte Audio-Stream nicht erstellen:\n\`\`\`${e.message}\`\`\``);
+                        return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
                     }
 
                     if (!stream) {
@@ -4123,11 +4112,15 @@ client.on('guildMemberAdd', async member => {
                     const player = createAudioPlayer();
                     connection.subscribe(player);
 
+                    // Title and duration
+                    const title = videoTitle || 'Audio';
+                    const durationStr = videoDuration ? `${Math.floor(videoDuration / 60)}:${(videoDuration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
+
                     // Create and play resource
                     try {
                         const resource = createAudioResource(stream, {
                             inputType: StreamType.Arbitrary,
-                            metadata: { title, duration }
+                            metadata: { title, duration: videoDuration }
                         });
 
                         player.play(resource);
@@ -4155,7 +4148,7 @@ client.on('guildMemberAdd', async member => {
 
                 } catch (e) {
                     console.error('Voice/Player error:', e);
-                    return interaction.editReply(`❌ Fehler beim Verbinden mit Voice-Channel:\n\`\`\`${e.message}\`\`\``);
+                    return interaction.editReply(`❌ Fehler:\n\`\`\`${e.message}\`\`\``);
                 }
 
             } catch (e) {
