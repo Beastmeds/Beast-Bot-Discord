@@ -4586,6 +4586,12 @@ client.on('guildMemberAdd', async member => {
     });
 
     // Add error handling for login
+    client.on('ready', () => {
+        console.log(`✅ Bot ist online und ready als ${client.user.tag}`);
+        console.log(`👥 Bot ist auf ${client.guilds.cache.size} Servern aktiv`);
+        client.user.setActivity('Musik abspielen 🎵', { type: 'LISTENING' });
+    });
+
     client.login(process.env.DISCORD_TOKEN).catch(error => {
         console.error('Failed to login:', error);
         process.exit(1);
