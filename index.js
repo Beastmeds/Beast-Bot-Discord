@@ -4081,17 +4081,8 @@ client.on('guildMemberAdd', async member => {
                     // Get stream from play-dl
                     try {
                         console.log(`🎵 Getting stream for: ${url}`);
-                        const info = await playdl.default.getInfo(url);
                         stream = await playdl.default.stream(url);
-                        
-                        if (!videoTitle) {
-                            videoTitle = info?.videoDetails?.title || info?.title || 'Audio';
-                        }
-                        if (!videoDuration) {
-                            videoDuration = info?.videoDetails?.lengthSeconds || info?.duration || 0;
-                        }
-                        
-                        console.log(`✅ Stream ready: ${videoTitle}`);
+                        console.log(`✅ Stream ready`);
                     } catch (e) {
                         console.error('Stream error:', e.message);
                         return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
