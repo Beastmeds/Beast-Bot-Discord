@@ -7,6 +7,8 @@ import Canvas from 'canvas';
 import fs from 'fs/promises';
 import path from 'path';
 import express from 'express';
+// Bot startup time tracker
+const BOT_START_TIME = Date.now();
 
 // Einfacher HTTP-Server für Replit / Uptime pings
 const app = express();
@@ -1124,6 +1126,14 @@ const commands = [
             { name: 'url', description: 'YouTube URL oder Song-Name', type: 3, required: true },
             { name: 'volume', description: 'Lautstärke (0-100)', type: 4, required: false }
         ]
+    },
+    {
+        name: 'ski',
+        description: 'Eine lustige Ski-Animation! 🎿'
+    },
+    {
+        name: 'info',
+        description: 'Zeigt Informationen über den Bot 🤖'
     }
 ];
 
@@ -3982,6 +3992,134 @@ client.on('guildMemberAdd', async member => {
             }
         } catch (e) {
             console.error('play command error', e);
+        }
+    });
+
+    // Ski Animation Handler: /ski zeigt eine lustige Ski-Animation
+    client.on('interactionCreate', async interaction => {
+        try {
+            if (!interaction.isChatInputCommand()) return;
+            if (interaction.__blocked) return;
+            if (interaction.commandName !== 'ski') return;
+
+            const skierName = interaction.user.username;
+            const frames = [
+                `🏔️ ${skierName} startet den Hang hinunter!`,
+                `     ⛷️  ${skierName} fährt schneller!`,
+                `          ⛷️  ${skierName} rast bergab!`,
+                `               ⛷️  ${skierName} VORSICHT! 🌲`,
+                `                    ⛷️  ${skierName} AUSWEICHEN! 🌲🌲`,
+                `                         ⛷️  ${skierName} AHHHHHHH! 💨`,
+                `🏁 ⛷️  ${skierName} ist angekommen! 🎉`,
+                `✅ ${skierName} hat den Hang erfolgreich bezwungen! 🏆`
+            ];
+
+            const msg = await interaction.reply({
+                content: frames[0],
+                fetchReply: true
+            });
+
+            for (let i = 1; i < frames.length; i++) {
+                await new Promise(r => setTimeout(r, 800));
+                try {
+                    await msg.edit({ content: frames[i] });
+                } catch (e) {
+                    console.warn('ski animation edit error', e);
+                }
+            }
+        } catch (e) {
+            console.error('ski handler error', e);
+        }
+    });
+
+    // Info Handler: /info zeigt Informationen über den Bot
+    client.on('interactionCreate', async interaction => {
+        try {
+            if (!interaction.isChatInputCommand()) return;
+            if (interaction.__blocked) return;
+            if (interaction.commandName !== 'info') return;
+
+            const uptime = Date.now() - BOT_START_TIME;
+            const days = Math.floor(uptime / (1000 * 60 * 60 * 24));
+            const hours = Math.floor((uptime % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+            const minutes = Math.floor((uptime % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((uptime % (1000 * 60)) / 1000);
+
+            const uptimeStr = `${days}d ${hours}h ${minutes}m ${seconds}s`;
+            const guilds = client.guilds.cache.size;
+            const users = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
+            const memory = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
+            const version = process.version;
+
+            const infoEmbed = {
+                title: '🤖 Beast Bot - Informationen',
+                description: 'Hier sind alle wichtigen Infos über den Bot!',
+                color: 0x00FF00,
+                fields: [
+                    {
+                        name: '⏱️ Uptime',
+                        value: `\`${uptimeStr}\``,
+                        inline: true
+                    },
+                    {
+                        name: '🏢 Server',
+                        value: `\`${guilds}\``,
+                        inline: true
+                    },
+                    {
+                        name: '👥 Nutzer',
+                        value: `\`${users}\``,
+                        inline: true
+                    },
+                    {
+                        name: '💾 RAM-Nutzung',
+                        value: `\`${memory}MB\``,
+                        inline: true
+                    },
+                    {
+                        name: '🔧 Node.js',
+                        value: `\`${version}\``,
+                        inline: true
+                    },
+                    {
+                        name: '📚 Discord.js',
+                        value: `\`v14\``,
+                        inline: true
+                    },
+                    {
+                        name: '👤 Ersteller',
+                        value: `\`Beastmeds\``,
+                        inline: false
+                    },
+                    {
+                        name: '🎯 Features',
+                        value: '✅ Musik abspielen\n✅ Voice-Channels\n✅ Moderation\n✅ Unterhaltung\n✅ Servereinrichtung',
+                        inline: false
+                    },
+                    {
+                        name: '🔗 Repository',
+                        value: '[GitHub - Beast Bot Discord](https://github.com/Beastmeds/Beast-Bot-Discord)',
+                        inline: false
+                    }
+                ],
+                thumbnail: {
+                    url: client.user.displayAvatarURL({ size: 512, dynamic: true })
+                },
+                footer: {
+                    text: `Beast Bot v1.0 | Powered by Discord.js`,
+                    icon_url: client.user.displayAvatarURL()
+                }
+            };
+
+            await interaction.reply({
+                embeds: [infoEmbed]
+            });
+        } catch (e) {
+            console.error('info handler error', e);
+            await interaction.reply({
+                content: '❌ Fehler beim Abrufen der Bot-Informationen.',
+                flags: MessageFlags.Ephemeral
+            });
         }
     });
 
