@@ -4051,64 +4051,60 @@ client.on('guildMemberAdd', async member => {
                             highWaterMark: 1 << 25
                         }
                     });
-                    
-                    // Event listeners
-                    client.player.on('error', (queue, error) => {
-                        console.error('Player Queue error:', error);
-                    });
-                    
-                    client.player.on('playerError', (queue, error) => {
-                        console.error('Player error:', error);
-                    });
                 }
 
-                // Get or create queue
-                let queue = client.player.queues.get(interaction.guild.id);
-                
-                if (!queue) {
-                    queue = client.player.createQueue(interaction.guild, {
-                        metadata: {
-                            channel: interaction.channel
-                        },
-                        volumeSmoothness: 0.1
-                    });
-                }
-
-                // Connect to voice channel
-                if (!queue.connection) {
-                    await queue.connect(voiceChannel);
-                }
-
-                // Search and play
                 try {
-                    await interaction.editReply('🔄 Suche und lade...');
+                    await interaction.editReply('🔄 Suche und lade Musik...');
                     
-                    const result = await client.player.search(url, {
+                    // Search for the track
+                    const searchResult = await client.player.search(url, {
                         requestedBy: interaction.user
+                    }).catch(e => {
+                        console.error('Search error:', e);
+                        return null;
                     });
 
-                    if (!result.tracks.length) {
+                    if (!searchResult || !searchResult.hasTracks()) {
                         return interaction.editReply('❌ Keine Musik gefunden. Überprüfe die URL oder den Suchbegriff.');
                     }
 
-                    const track = result.tracks[0];
-                    queue.addTrack(track);
-
-                    // Play if nothing is playing
-                    if (!queue.playing) {
-                        await queue.play();
+                    const track = searchResult.tracks[0];
+                    
+                    // Get or create subscription
+                    let subscription = client.player.nodes.get(interaction.guild.id);
+                    
+                    if (!subscription) {
+                        subscription = await client.player.nodes.create(interaction.guild, {
+                            metadata: {
+                                channel: interaction.channel
+                            },
+                            leaveOnEmpty: true,
+                            leaveOnEmptyCooldown: 300000,
+                            leaveOnEnd: true,
+                            leaveOnEndCooldown: 300000
+                        });
                     }
+
+                    // Connect to voice channel
+                    if (!subscription.connection) {
+                        subscription.setChannel(voiceChannel);
+                    }
+
+                    // Play track
+                    await subscription.node.play(track);
+
+                    const duration = track.duration ? `${Math.floor(track.duration / 1000 / 60)}:${(Math.floor(track.duration / 1000) % 60).toString().padStart(2, '0')}` : 'Unbekannt';
 
                     await interaction.editReply(
                         `🎵 **${track.title}**\n` +
-                        `👤 von ${track.author}\n` +
-                        `⏱️ Dauer: ${track.duration}\n` +
+                        `👤 von ${track.author || 'Unbekannt'}\n` +
+                        `⏱️ Dauer: ${duration}\n` +
                         `🔊 Lautstärke: ${volume}%\n\n` +
-                        (queue.tracks.length > 0 ? `📋 ${queue.tracks.length} weitere Songs in der Queue` : '✅ Wird jetzt abgespielt!')
+                        `✅ Wird jetzt abgespielt!`
                     );
 
                 } catch (e) {
-                    console.error('Search/play error:', e);
+                    console.error('Play error:', e);
                     return interaction.editReply(`❌ Fehler beim Abspielen:\n\`\`\`${e.message}\`\`\``);
                 }
 
