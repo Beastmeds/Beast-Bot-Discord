@@ -26,9 +26,6 @@ const client = new Client({
     ],
 });
 
-// Increase max listeners to avoid MaxListenersExceededWarning during development
-try { client.setMaxListeners && client.setMaxListeners(20); } catch (_) {}
-
 // Global error handlers — prevent process from crashing on Discord API timing issues
 process.on('unhandledRejection', (reason, p) => {
     console.error('Unhandled Rejection at:', p, 'reason:', reason && (reason.stack || reason));
@@ -4067,80 +4064,14 @@ client.on('guildMemberAdd', async member => {
                                 return interaction.editReply(`❌ URL ist ungültig oder nicht unterstützt.`);
                             }
 
-                            try {
-                                console.log(`🎵 Streaming URL: ${query}`);
-                                console.log('-> validate result before stream:', isValid);
-                                console.log('-> query type:', typeof query);
-                                const streamResult = await playdl.default.stream(query);
-                                stream = streamResult.stream;
-                                videoTitle = streamResult.info?.videoDetails?.title || streamResult.info?.title || query;
-                                videoDuration = streamResult.info?.videoDetails?.lengthSeconds || 0;
-                                console.log('-> streamResult.info available:', !!streamResult.info);
-                            } catch (e) {
-                                console.warn('URL stream error:', e.message);
-                                console.warn(e.stack);
-                                // Fallback: extract a search term (video id or readable path) and search
-                                const fallbackQuery = (() => {
-                                    try {
-                                        const u = new URL(query);
-                                        if (u.searchParams.has('v')) return u.searchParams.get('v');
-                                        // return last segment as fallback
-                                        const seg = u.pathname.split('/').filter(Boolean).pop();
-                                        return seg || query;
-                                    } catch (_) {
-                                        return query;
-                                    }
-                                })();
-
-                                    try {
-                                    console.log(`🔁 Falling back to search for: ${fallbackQuery}`);
-                                    const results = await playdl.default.search(fallbackQuery, { limit: 1 });
-                                    if (!results || results.length === 0) {
-                                        throw new Error('Kein Ergebnis beim Fallback-Search');
-                                    }
-                                    const r = results[0];
-                                    console.log('-> Fallback search result:', r.url, 'id:', r.id || r.videoId || null);
-
-                                    // Try streaming the result.url first
-                                    try {
-                                        const fallbackStream = await playdl.default.stream(r.url);
-                                        stream = fallbackStream.stream;
-                                        videoTitle = r.title || fallbackStream.info?.videoDetails?.title || videoTitle;
-                                        videoDuration = r.durationMs ? Math.floor(r.durationMs / 1000) : fallbackStream.info?.videoDetails?.lengthSeconds || videoDuration;
-                                        console.log('-> fallback stream succeeded (result.url)');
-                                    } catch (streamErr) {
-                                        console.warn('fallback stream from result.url failed:', streamErr.message);
-                                        // If result.url looks like an id or is missing, try to construct watch URL from id
-                                        const vid = r.id || r.videoId || (typeof r === 'string' ? r : null);
-                                        if (vid) {
-                                            const watchUrl = `https://www.youtube.com/watch?v=${vid}`;
-                                            try {
-                                                console.log('-> Trying constructed watch URL:', watchUrl);
-                                                const fallbackStream2 = await playdl.default.stream(watchUrl);
-                                                stream = fallbackStream2.stream;
-                                                videoTitle = r.title || fallbackStream2.info?.videoDetails?.title || videoTitle;
-                                                videoDuration = r.durationMs ? Math.floor(r.durationMs / 1000) : fallbackStream2.info?.videoDetails?.lengthSeconds || videoDuration;
-                                                console.log('-> fallback stream succeeded (constructed watch URL)');
-                                            } catch (watchErr) {
-                                                console.error('constructed watchUrl stream failed:', watchErr.message);
-                                                throw watchErr;
-                                            }
-                                        } else {
-                                            throw streamErr;
-                                        }
-                                    }
-
-                                } catch (err) {
-                                    console.error('URL fallback error:', err.message);
-                                    console.error(err.stack);
-                                    try { await interaction.channel.send({ content: `Ich konnte nicht in Voice abspielen. Hier der Link: ${query}` }); } catch (_) {}
-                                    return interaction.editReply(`❌ Fehler beim Stream: ${e.message}\nFallback-Fehler: ${err.message}`);
-                                }
-                            }
+                            console.log(`🎵 Streaming URL: ${query}`);
+                            const streamResult = await playdl.default.stream(query);
+                            stream = streamResult.stream;
+                            videoTitle = streamResult.info?.videoDetails?.title || streamResult.info?.title || query;
+                            videoDuration = streamResult.info?.videoDetails?.lengthSeconds || 0;
 
                         } catch (e) {
-                            console.error('URL validation error:', e.message);
-                            try { await interaction.channel.send({ content: `Ich konnte nicht in Voice abspielen. Hier der Link: ${query}` }); } catch (_) {}
+                            console.error('URL stream error:', e.message);
                             return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
                         }
                     } else {
@@ -4156,31 +4087,11 @@ client.on('guildMemberAdd', async member => {
                             const result = results[0];
                             console.log(`✅ Found: ${result.title} (${result.url})`);
                             
-                            // Get stream, with fallback to ytsearch if result.url fails
-                            try {
-                                console.log('-> Attempting to stream result.url:', result.url);
-                                const streamResult = await playdl.default.stream(result.url);
-                                stream = streamResult.stream;
-                                videoTitle = result.title || 'Audio';
-                                videoDuration = result.durationMs ? Math.floor(result.durationMs / 1000) : 0;
-                                console.log('-> stream from result.url succeeded');
-                            } catch (e) {
-                                console.warn('Stream from result.url failed:', e.message);
-                                console.warn(e.stack);
-                                try {
-                                    console.log('-> Trying ytsearch fallback with query:', query);
-                                    const fallback = await playdl.default.stream(`ytsearch:${query}`);
-                                    stream = fallback.stream;
-                                    videoTitle = fallback.info?.videoDetails?.title || fallback.info?.title || result.title || 'Audio';
-                                    videoDuration = fallback.info?.videoDetails?.lengthSeconds || 0;
-                                    console.log('-> ytsearch fallback succeeded');
-                                } catch (err) {
-                                    console.error('Search fallback error:', err.message);
-                                    console.error(err.stack);
-                                    try { await interaction.channel.send({ content: `Ich konnte nicht in Voice abspielen. Hier der Link: ${result?.url || query}` }); } catch (_) {}
-                                    return interaction.editReply(`❌ Fehler beim Stream: ${e.message}\nFallback-Fehler: ${err.message}`);
-                                }
-                            }
+                            // Get stream
+                            const streamResult = await playdl.default.stream(result.url);
+                            stream = streamResult.stream;
+                            videoTitle = result.title || 'Audio';
+                            videoDuration = result.durationMs ? Math.floor(result.durationMs / 1000) : 0;
 
                         } catch (e) {
                             console.error('Search error:', e.message);
