@@ -1097,9 +1097,21 @@ const commands = [
     },
     {
         name: 'ownertodo',
-        description: 'Sende eine Nachricht privat an den Bot-Owner (nur Owner darf den Befehl nutzen)',
+        description: 'Verwalte deine Owner-Todos (add/list/complete)',
         options: [
-            { name: 'note', description: 'Die Nachricht für den Owner', type: 3, required: true }
+            {
+                name: 'action',
+                description: 'Aktion',
+                type: 3,
+                required: true,
+                choices: [
+                    { name: 'add', value: 'add' },
+                    { name: 'list', value: 'list' },
+                    { name: 'complete', value: 'complete' }
+                ]
+            },
+            { name: 'todo', description: 'Todo-Text (für add)', type: 3, required: false },
+            { name: 'id', description: 'Todo-ID zum abhaken (für complete)', type: 4, required: false }
         ]
     },
 
@@ -3759,46 +3771,136 @@ client.on('guildMemberAdd', async member => {
         }
     });
 
-    // Owner-only: send a private note to the configured owner(s)
+    // Owner-Todo List Manager
     client.on('interactionCreate', async interaction => {
-        if (!interaction.isChatInputCommand()) return;
-        if (interaction.__blocked) return;
-        if (interaction.commandName !== 'ownertodo') return;
+        try {
+            if (!interaction.isChatInputCommand()) return;
+            if (interaction.__blocked) return;
+            if (interaction.commandName !== 'ownertodo') return;
 
-        const cfg = await loadConfig();
-        const owners = new Set();
-        if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
-        if (cfg.ownerId) owners.add(cfg.ownerId);
-        if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
-        if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+            const cfg = await loadConfig();
+            const owners = new Set();
+            if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+            if (cfg.ownerId) owners.add(cfg.ownerId);
+            if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+            if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
 
-        if (!owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur der Bot-Owner kann diesen Befehl ausführen.', flags: MessageFlags.Ephemeral });
-
-        const note = interaction.options.getString('note');
-        if (!note) return interaction.reply({ content: 'Bitte gib eine Nachricht an.', flags: MessageFlags.Ephemeral });
-
-        await interaction.deferReply({ ephemeral: true });
-
-        // Send DM to each configured owner; collect results
-        const results = [];
-        for (const oid of owners) {
-            try {
-                const user = await client.users.fetch(oid).catch(() => null);
-                if (!user) {
-                    results.push(`${oid}: not found`);
-                    continue;
-                }
-                const dmText = `Neue Owner-Todo von ${interaction.user.tag} (${interaction.user.id}) in Guild ${interaction.guild ? `${interaction.guild.name} (${interaction.guild.id})` : 'DM'}:\n\n${note}`;
-                await user.send({ content: dmText }).catch(e => { throw e; });
-                results.push(`${user.tag}: gesendet`);
-            } catch (e) {
-                console.error('ownertodo send error to', oid, e);
-                results.push(`${oid}: fehler (${e && e.message ? e.message : 'unknown'})`);
+            if (!owners.has(interaction.user.id)) {
+                return interaction.reply({ 
+                    content: '❌ Nur der Bot-Owner kann diesen Befehl ausführen.', 
+                    flags: MessageFlags.Ephemeral 
+                });
             }
-        }
 
-        const out = results.join('\n');
-        try { await interaction.editReply({ content: `Owner-Message gesendet. Ergebnisse:\n${out}` }); } catch (e) { try { await interaction.followUp({ content: `Owner-Message Ergebnisse:\n${out}`, ephemeral: true }); } catch(_){} }
+            const action = interaction.options.getString('action');
+            
+            // Initialize todo list if not exists
+            cfg._global = cfg._global || {};
+            cfg._global.todos = cfg._global.todos || [];
+            cfg._global.nextTodoId = cfg._global.nextTodoId || 1;
+
+            if (action === 'add') {
+                const todoText = interaction.options.getString('todo');
+                if (!todoText) {
+                    return interaction.reply({ 
+                        content: '❌ Bitte gib einen Todo-Text an.', 
+                        flags: MessageFlags.Ephemeral 
+                    });
+                }
+
+                const todoId = cfg._global.nextTodoId++;
+                cfg._global.todos.push({
+                    id: todoId,
+                    text: todoText,
+                    completed: false,
+                    createdBy: interaction.user.tag,
+                    createdAt: new Date().toISOString(),
+                    completedAt: null
+                });
+
+                await saveConfig(cfg);
+
+                return interaction.reply({
+                    content: `✅ Todo #${todoId} hinzugefügt: **${todoText}**\n\nNutze \`/ownertodo list\` um alle Todos zu sehen!`,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            else if (action === 'list') {
+                if (cfg._global.todos.length === 0) {
+                    return interaction.reply({
+                        content: '📋 Keine Todos vorhanden! Erstelle eine mit \`/ownertodo add\`',
+                        flags: MessageFlags.Ephemeral
+                    });
+                }
+
+                let listText = '📋 **Owner Todos:**\n\n';
+                const pending = cfg._global.todos.filter(t => !t.completed);
+                const completed = cfg._global.todos.filter(t => t.completed);
+
+                if (pending.length > 0) {
+                    listText += '**⏳ Ausstehend:**\n';
+                    pending.forEach(todo => {
+                        listText += `  #${todo.id} ▫️ ${todo.text}\n`;
+                    });
+                }
+
+                if (completed.length > 0) {
+                    listText += '\n**✅ Abgehakt:**\n';
+                    completed.forEach(todo => {
+                        listText += `  #${todo.id} ✔️ ~~${todo.text}~~\n`;
+                    });
+                }
+
+                listText += `\n**Gesamt:** ${cfg._global.todos.length} | **Offen:** ${pending.length} | **Fertig:** ${completed.length}`;
+
+                return interaction.reply({
+                    content: listText,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+            else if (action === 'complete') {
+                const todoId = interaction.options.getInteger('id');
+                if (!todoId) {
+                    return interaction.reply({ 
+                        content: '❌ Bitte gib die Todo-ID an.', 
+                        flags: MessageFlags.Ephemeral 
+                    });
+                }
+
+                const todo = cfg._global.todos.find(t => t.id === todoId);
+                if (!todo) {
+                    return interaction.reply({ 
+                        content: `❌ Todo #${todoId} nicht gefunden.`, 
+                        flags: MessageFlags.Ephemeral 
+                    });
+                }
+
+                if (todo.completed) {
+                    return interaction.reply({ 
+                        content: `⚠️ Todo #${todoId} ist bereits abgehakt.`, 
+                        flags: MessageFlags.Ephemeral 
+                    });
+                }
+
+                todo.completed = true;
+                todo.completedAt = new Date().toISOString();
+                await saveConfig(cfg);
+
+                return interaction.reply({
+                    content: `✅ Todo #${todoId} abgehakt: ~~${todo.text}~~`,
+                    flags: MessageFlags.Ephemeral
+                });
+            }
+
+        } catch (e) {
+            console.error('ownertodo handler error', e);
+            await interaction.reply({
+                content: '❌ Fehler bei der Todo-Verwaltung.',
+                flags: MessageFlags.Ephemeral
+            });
+        }
     });
 
     // Ensure /hack is handled: edits reply progressively (robust fallback)
