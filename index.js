@@ -4076,29 +4076,35 @@ client.on('guildMemberAdd', async member => {
                             } catch (e) {
                                 console.warn('URL stream error:', e.message);
                                 console.warn(e.stack);
-                                // Fallback: try a ytsearch with a cleaned search term
+                                // Fallback: extract a search term (video id or readable path) and search
                                 const fallbackQuery = (() => {
                                     try {
-                                        // Try to extract a readable name from URL
                                         const u = new URL(query);
                                         if (u.searchParams.has('v')) return u.searchParams.get('v');
-                                        return u.pathname.replace(/\/+/, ' ').replace(/\-/g, ' ');
+                                        // return last segment as fallback
+                                        const seg = u.pathname.split('/').filter(Boolean).pop();
+                                        return seg || query;
                                     } catch (_) {
                                         return query;
                                     }
                                 })();
 
                                 try {
-                                    console.log(`🔁 Falling back to ytsearch for: ${fallbackQuery}`);
-                                    const fallback = await playdl.default.stream(`ytsearch:${fallbackQuery}`);
-                                    stream = fallback.stream;
-                                    videoTitle = fallback.info?.videoDetails?.title || fallback.info?.title || videoTitle;
-                                    videoDuration = fallback.info?.videoDetails?.lengthSeconds || videoDuration;
+                                    console.log(`🔁 Falling back to search for: ${fallbackQuery}`);
+                                    const results = await playdl.default.search(fallbackQuery, { limit: 1 });
+                                    if (!results || results.length === 0) {
+                                        throw new Error('Kein Ergebnis beim Fallback-Search');
+                                    }
+                                    const r = results[0];
+                                    console.log('-> Fallback search result:', r.url);
+                                    const fallbackStream = await playdl.default.stream(r.url);
+                                    stream = fallbackStream.stream;
+                                    videoTitle = r.title || fallbackStream.info?.videoDetails?.title || videoTitle;
+                                    videoDuration = r.durationMs ? Math.floor(r.durationMs / 1000) : fallbackStream.info?.videoDetails?.lengthSeconds || videoDuration;
                                     console.log('-> fallback stream succeeded');
                                 } catch (err) {
                                     console.error('URL fallback error:', err.message);
                                     console.error(err.stack);
-                                    // Reply with the original and fallback error messages for debugging
                                     return interaction.editReply(`❌ Fehler beim Stream: ${e.message}\nFallback-Fehler: ${err.message}`);
                                 }
                             }
