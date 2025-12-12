@@ -4046,25 +4046,15 @@ client.on('guildMemberAdd', async member => {
 
                 try {
                     const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
-                    const playdl = await import('play-dl');
+                    const ytdl = await import('ytdl-core');
 
-                    // Get stream from play-dl
+                    // Get stream from ytdl-core
                     let stream = null;
                     let info = null;
 
                     try {
-                        // Validate and get stream
-                        const isValid = await playdl.default.validate(url).catch(e => {
-                            console.warn('Validation failed:', e.message);
-                            return null;
-                        });
-
-                        if (!isValid) {
-                            return interaction.editReply('❌ URL ist ungültig oder nicht unterstützt. Verwende einen YouTube-Link.');
-                        }
-
                         // Get info
-                        info = await playdl.default.getInfo(url).catch(e => {
+                        info = await ytdl.default.getInfo(url).catch(e => {
                             console.warn('getInfo failed:', e.message);
                             return null;
                         });
@@ -4073,8 +4063,11 @@ client.on('guildMemberAdd', async member => {
                             return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
                         }
 
-                        // Create stream
-                        stream = await playdl.default.stream(url).catch(e => {
+                        // Create stream with audio format
+                        stream = ytdl.default(url, {
+                            quality: 'highestaudio',
+                            highWaterMark: 1 << 25
+                        }).catch(e => {
                             console.error('Stream error:', e);
                             return null;
                         });
@@ -4084,7 +4077,7 @@ client.on('guildMemberAdd', async member => {
                         }
 
                     } catch (e) {
-                        console.error('play-dl error:', e.message);
+                        console.error('ytdl-core error:', e.message);
                         return interaction.editReply(`❌ Fehler beim Laden der Musik:\n\`\`\`${e.message}\`\`\``);
                     }
 
@@ -4100,8 +4093,8 @@ client.on('guildMemberAdd', async member => {
                     connection.subscribe(player);
 
                     // Get title and duration
-                    const title = info?.video_details?.title || info?.title || info?.videoDetails?.title || 'Audio';
-                    const duration = info?.video_details?.length_seconds || info?.duration || info?.videoDetails?.lengthSeconds || 0;
+                    const title = info?.videoDetails?.title || info?.title || 'Audio';
+                    const duration = info?.videoDetails?.lengthSeconds || info?.duration || 0;
                     const durationStr = duration ? `${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
 
                     // Create and play resource
