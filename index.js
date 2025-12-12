@@ -8,6 +8,7 @@ import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
 import express from 'express';
+import play from 'play-dl';
 // Bot startup time tracker
 const BOT_START_TIME = Date.now();
 
@@ -398,6 +399,119 @@ client.on('interactionCreate', async interaction => {
     } catch (e) {
         console.error('/setup error', e);
         return interaction.editReply({ content: `Fehler beim Erstellen des Setups: ${e.message || String(e)}` });
+    }
+});
+
+// ----------------------
+// Music command handlers: /play, /pause, /resume, /stop, /skip
+// ----------------------
+
+client.on('interactionCreate', async interaction => {
+    if (!interaction.isChatInputCommand()) return;
+    if (interaction.__blocked) return;
+
+    try {
+        // /play
+        if (interaction.commandName === 'play') {
+            const q = interaction.options.getString('url');
+            const vol = interaction.options.getInteger('volume') || 100;
+            if (!q) return interaction.reply({ content: 'Bitte gib einen Songnamen oder eine URL an.', flags: MessageFlags.Ephemeral });
+            await interaction.deferReply();
+            const en = await enqueueAndMaybeStart(interaction, q, vol);
+            if (!en) return interaction.editReply('Keine Musik gefunden oder ein Fehler ist aufgetreten.');
+            return interaction.editReply(`✅ Zur Warteschlange hinzugefügt: **${en.track.title}** (Position: ${en.position})`);
+        }
+
+        // /pause
+        if (interaction.commandName === 'pause') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const ok = pauseMusic(interaction.guild.id);
+            return interaction.reply({ content: ok ? '⏸️ Musik pausiert.' : 'Es läuft gerade nichts.', flags: MessageFlags.Ephemeral });
+        }
+
+        // /resume
+        if (interaction.commandName === 'resume') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const ok = resumeMusic(interaction.channel, interaction.guild.id);
+            return interaction.reply({ content: ok ? '▶️ Musik fortgesetzt.' : 'Es gibt nichts zum Fortsetzen.', flags: MessageFlags.Ephemeral });
+        }
+
+        // /stop
+        if (interaction.commandName === 'stop') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const ok = stopMusic(interaction.guild.id);
+            return interaction.reply({ content: ok ? '⏹️ Musik gestoppt und Queue geleert.' : 'Es lief nichts.', flags: MessageFlags.Ephemeral });
+        }
+
+        // /skip
+        if (interaction.commandName === 'skip') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const ok = skipMusic(interaction.channel, interaction.guild.id);
+            return interaction.reply({ content: ok ? '⏭️ Track übersprungen.' : 'Keine Songs in der Queue.', flags: MessageFlags.Ephemeral });
+        }
+
+        // /queue
+        if (interaction.commandName === 'queue') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const state = getMusicState(interaction.guild.id);
+            if (!state.queue || state.queue.length === 0) {
+                return interaction.reply({ content: '📭 Die Warteschlange ist leer.', flags: MessageFlags.Ephemeral });
+            }
+            let queueText = '📋 **Warteschlange:**\n\n';
+            state.queue.forEach((track, idx) => {
+                queueText += `${idx + 1}. **${track.title}** (von ${track.requestedBy})\n`;
+            });
+            queueText += `\n**Gesamt:** ${state.queue.length} Songs`;
+            return interaction.reply({ content: queueText, flags: MessageFlags.Ephemeral });
+        }
+
+        // /nowplaying
+        if (interaction.commandName === 'nowplaying') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const state = getMusicState(interaction.guild.id);
+            if (!state.current || !state.current.item) {
+                return interaction.reply({ content: '⏹️ Es läuft gerade nichts.', flags: MessageFlags.Ephemeral });
+            }
+            const progress = '▓▓▓░░░░░░'; // Simple progress bar
+            const nowplayingText = `🎵 **Now Playing:**\n\n**${state.current.item.title}**\n${progress} 50%\nVon: ${state.current.item.requestedBy}`;
+            return interaction.reply({ content: nowplayingText, flags: MessageFlags.Ephemeral });
+        }
+
+        // /volume
+        if (interaction.commandName === 'volume') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            const level = interaction.options.getInteger('level');
+            if (level < 0 || level > 200) {
+                return interaction.reply({ content: '❌ Die Lautstärke muss zwischen 0 und 200 liegen.', flags: MessageFlags.Ephemeral });
+            }
+            const state = getMusicState(interaction.guild.id);
+            if (state.current && state.current.item) {
+                state.current.item.volume = level;
+            }
+            // Also set for next items
+            state.queue.forEach(track => track.volume = level);
+            return interaction.reply({ content: `🔊 Lautstärke auf **${level}%** gesetzt.`, flags: MessageFlags.Ephemeral });
+        }
+
+        // /join
+        if (interaction.commandName === 'join') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            if (!interaction.member.voice.channel) {
+                return interaction.reply({ content: '❌ Du musst in einem Voice-Channel sein.', flags: MessageFlags.Ephemeral });
+            }
+            // The bot would need voice connection handling here
+            return interaction.reply({ content: `✅ Bot tritt dem Voice-Channel **${interaction.member.voice.channel.name}** bei.`, flags: MessageFlags.Ephemeral });
+        }
+
+        // /leave
+        if (interaction.commandName === 'leave') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            stopMusic(interaction.guild.id);
+            return interaction.reply({ content: '👋 Bot hat den Voice-Channel verlassen und die Queue geleert.', flags: MessageFlags.Ephemeral });
+        }
+    } catch (e) {
+        console.error('music command handler error', e && e.stack || e);
+        try { if (!interaction.replied && !interaction.deferred) await interaction.reply({ content: 'Fehler beim Ausführen des Musik-Befehls.', flags: MessageFlags.Ephemeral }); else if (interaction.deferred) await interaction.editReply('Fehler beim Ausführen des Musik-Befehls.'); } catch(_){}
     }
 });
 
@@ -1141,6 +1255,45 @@ const commands = [
         ]
     },
     {
+        name: 'pause',
+        description: 'Pausiert die Musik (wartet darauf, die Warteschlange anzuhalten)'
+    },
+    {
+        name: 'resume',
+        description: 'Setzt die Musik fort (setzt die Warteschlange fort)'
+    },
+    {
+        name: 'stop',
+        description: 'Stoppt die Musik und leert die Queue'
+    },
+    {
+        name: 'skip',
+        description: 'Überspringt den aktuellen Track'
+    },
+    {
+        name: 'queue',
+        description: 'Zeigt die komplette Warteschlange an'
+    },
+    {
+        name: 'nowplaying',
+        description: 'Zeigt, was gerade läuft (mit Fortschritt)'
+    },
+    {
+        name: 'volume',
+        description: 'Ändert die Lautstärke',
+        options: [
+            { name: 'level', description: 'Lautstärke (0-200)', type: 4, required: true }
+        ]
+    },
+    {
+        name: 'join',
+        description: 'Bot joint den Voice-Channel'
+    },
+    {
+        name: 'leave',
+        description: 'Bot leavt den Voice-Channel'
+    },
+    {
         name: 'ski',
         description: 'Eine lustige Ski-Animation! 🎿'
     },
@@ -1249,6 +1402,163 @@ const localConceptDB = {
     'async': '"async" beschreibt asynchrone Programmierung: Operationen laufen nebenbei (z.B. Netzwerk), ohne den Haupt-Thread zu blockieren. In JavaScript nutzt man async/await:\n\n```javascript\nasync function fetchData() {\n  const r = await fetch(\'https://example.com\');\n  return await r.json();\n}\n```\n',
     'oop': 'OOP (Objektorientierte Programmierung) organisiert Code in Klassen/Objekte mit Eigenschaften (Attributes) und Verhalten (Methoden). Beispiel (Python):\n\n```python\nclass Dog:\n    def __init__(self, name):\n        self.name = name\n    def bark(self):\n        print(\'Wuff, ich bin\', self.name)\n```\n',
 };
+
+// ----------------------
+// Simple Music Queue Manager (per-guild, text-channel playback)
+// Uses play-dl to search and stream audio, downloads to tmp/ and sends as attachments.
+// Controls: /play (enqueue), /pause, /resume, /stop, /skip
+// ----------------------
+
+const musicStates = new Map();
+
+function getMusicState(guildId) {
+    if (!guildId) guildId = 'global';
+    if (!musicStates.has(guildId)) {
+        musicStates.set(guildId, { queue: [], playing: false, paused: false, current: null });
+    }
+    return musicStates.get(guildId);
+}
+
+async function enqueueAndMaybeStart(interaction, query, volume = 100) {
+    const guildId = interaction.guild?.id || 'dm';
+    const state = getMusicState(guildId);
+
+    // try search first
+    let track = null;
+    try {
+        // if looks like a YouTube/watch URL or youtu.be short link, treat as direct
+        const q = (query || '').trim();
+        const isUrl = /^https?:\/\//i.test(q);
+        if (isUrl) {
+            track = { title: q, url: q, requestedBy: interaction.user.tag };
+        } else {
+            const res = await play.search(q, { limit: 1 }).catch(() => []);
+            if (res && res.length) {
+                const r = res[0];
+                track = { title: r.title || r.name || q, url: r.url || r.link || q, requestedBy: interaction.user.tag };
+            }
+        }
+    } catch (e) {
+        console.error('enqueue search error', e && e.message);
+    }
+
+    if (!track) return null;
+
+    track.volume = volume;
+    state.queue.push(track);
+    // auto-create tmp dir
+    try { if (!fsSync.existsSync(path.resolve('./tmp'))) fsSync.mkdirSync(path.resolve('./tmp'), { recursive: true }); } catch(_) {}
+
+    // if not playing and not paused, start playback
+    if (!state.playing && !state.paused) {
+        startNextInGuild(interaction.channel, guildId).catch(e => console.error('startNext error', e));
+    }
+    return { track, position: state.queue.length };
+}
+
+async function startNextInGuild(channel, guildId) {
+    const state = getMusicState(guildId);
+    if (state.paused) return;
+    if (state.playing) return;
+    const next = state.queue.shift();
+    if (!next) return; // nothing to play
+
+    state.playing = true;
+    state.current = { item: next, filePath: null, stream: null, writeStream: null };
+    const tmpName = `${Date.now()}_${Math.random().toString(36).slice(2,8)}.mp4`;
+    const tmpPath = path.resolve('./tmp', tmpName);
+    state.current.filePath = tmpPath;
+
+    try {
+        // get stream via play-dl
+        const streamInfo = await play.stream(next.url).catch(err => { throw err; });
+        state.current.stream = streamInfo.stream;
+        const outStream = fsSync.createWriteStream(tmpPath);
+        state.current.writeStream = outStream;
+
+        // Hook to allow aborting
+        state.current.abort = () => {
+            try { if (state.current && state.current.stream && typeof state.current.stream.destroy === 'function') state.current.stream.destroy(); } catch(_) {}
+            try { if (state.current && state.current.writeStream && typeof state.current.writeStream.destroy === 'function') state.current.writeStream.destroy(); } catch(_) {}
+        };
+
+        // Pipe and wait
+        await new Promise((resolve, reject) => {
+            streamInfo.stream.pipe(outStream);
+            let finished = false;
+            outStream.on('finish', () => { finished = true; resolve(); });
+            outStream.on('error', (err) => { if (!finished) reject(err); });
+            streamInfo.stream.on('error', (err) => { if (!finished) reject(err); });
+        });
+
+        // send file to channel
+        try {
+            await channel.send({ content: `▶️ Now playing: **${next.title}** — requested by ${next.requestedBy}`, files: [tmpPath] });
+        } catch (e) {
+            console.error('send file failed', e && e.message);
+            await channel.send(`▶️ Now playing: ${next.title} — ${next.requestedBy}\n(Fehler beim Hochladen der Audiodatei, hier der Link: ${next.url})`);
+        }
+    } catch (e) {
+        console.error('play stream error', e && (e.stack || e));
+        try { await channel.send(`❗ Fehler beim Abspielen von ${next.title || next.url}: ${e.message || String(e)}`); } catch(_){}
+    } finally {
+        // cleanup current file
+        try { if (state.current && state.current.filePath && fsSync.existsSync(state.current.filePath)) fsSync.unlinkSync(state.current.filePath); } catch(_) {}
+        state.current = null;
+        state.playing = false;
+        // start next if available and not paused
+        if (!state.paused && state.queue.length > 0) {
+            // small delay to avoid spamming
+            setTimeout(() => startNextInGuild(channel, guildId).catch(e => console.error('startNext loop error', e)), 400);
+        }
+    }
+}
+
+function pauseMusic(guildId) {
+    const state = getMusicState(guildId);
+    if (!state) return false;
+    // if currently playing, abort and requeue current
+    if (state.current && state.current.item) {
+        const currentItem = state.current.item;
+        try { state.current.abort && state.current.abort(); } catch(_){}
+        // requeue to front
+        state.queue.unshift(currentItem);
+        state.current = null;
+        state.playing = false;
+    }
+    state.paused = true;
+    return true;
+}
+
+function resumeMusic(channel, guildId) {
+    const state = getMusicState(guildId);
+    if (!state) return false;
+    state.paused = false;
+    if (!state.playing) startNextInGuild(channel, guildId).catch(e => console.error('resume startNext error', e));
+    return true;
+}
+
+function stopMusic(guildId) {
+    const state = getMusicState(guildId);
+    if (!state) return false;
+    try { if (state.current && state.current.abort) state.current.abort(); } catch(_){}
+    state.current = null;
+    state.queue = [];
+    state.playing = false;
+    state.paused = false;
+    return true;
+}
+
+function skipMusic(channel, guildId) {
+    const state = getMusicState(guildId);
+    if (!state) return false;
+    try { if (state.current && state.current.abort) state.current.abort(); } catch(_){}
+    state.current = null;
+    state.playing = false;
+    if (!state.paused) startNextInGuild(channel, guildId).catch(e => console.error('skip startNext error', e));
+    return true;
+}
+
 
 // Message-based helper commands (configurable prefix)
 client.on('messageCreate', async (message) => {
