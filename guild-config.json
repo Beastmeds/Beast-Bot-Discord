@@ -58,7 +58,8 @@
       },
       "ultra": true,
       "enabled": true
-    }
+    },
+    "voiceChannelId": "1449030865505095812"
   },
   "_global": {
     "guildId": "1432754371761803374",
@@ -68,7 +69,7 @@
     ],
     "disabledCommands": [
       "team",
-      "/team users",
+      "team users",
       "ping"
     ],
     "ownerOnly": false,
