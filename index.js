@@ -4051,53 +4051,61 @@ client.on('guildMemberAdd', async member => {
 
                     // Determine if query is a URL or search term
                     let url = null;
-                    let info = null;
+                    let videoTitle = null;
+                    let videoDuration = null;
 
                     const isUrl = query.startsWith('http://') || query.startsWith('https://');
 
                     if (isUrl) {
                         // Direct URL provided
                         url = query;
-                        try {
-                            info = await ytdl.default.getInfo(url).catch(e => {
-                                console.warn('getInfo failed:', e.message);
-                                return null;
-                            });
-                        } catch (e) {
-                            console.warn('ytdl getInfo error:', e.message);
-                        }
                     } else {
                         // Search for song on YouTube
                         try {
-                            const results = await playdl.default.search(query, { limit: 1 });
+                            console.log(`🔍 Searching for: ${query}`);
+                            const results = await playdl.default.search(query, { limit: 5 });
+                            
                             if (!results || results.length === 0) {
                                 return interaction.editReply(`❌ Kein Lied gefunden für: **${query}**`);
                             }
+
+                            console.log(`Found ${results.length} results, using first one:`, results[0].url);
                             url = results[0].url;
-                            info = await ytdl.default.getInfo(url).catch(e => {
-                                console.warn('getInfo failed after search:', e.message);
-                                return null;
-                            });
+                            videoTitle = results[0].title || null;
+                            videoDuration = results[0].durationMs ? Math.floor(results[0].durationMs / 1000) : null;
                         } catch (e) {
                             console.error('Search error:', e.message);
                             return interaction.editReply(`❌ Fehler bei der Suche:\n\`\`\`${e.message}\`\`\``);
                         }
                     }
 
-                    if (!info) {
-                        return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
+                    // Try to get info from ytdl-core
+                    let info = null;
+                    try {
+                        console.log(`Getting info for URL: ${url}`);
+                        info = await ytdl.default.getInfo(url);
+                        console.log('Info fetched successfully');
+                    } catch (e) {
+                        console.warn('ytdl getInfo failed, will use search results:', e.message);
                     }
+
+                    // Extract title and duration
+                    const title = videoTitle || info?.videoDetails?.title || 'Audio';
+                    const duration = videoDuration || info?.videoDetails?.lengthSeconds || 0;
+                    const durationStr = duration ? `${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
 
                     // Create stream with audio format
                     let stream = null;
                     try {
+                        console.log(`Creating stream for: ${url}`);
                         stream = ytdl.default(url, {
                             quality: 'highestaudio',
                             highWaterMark: 1 << 25
                         });
+                        console.log('Stream created');
                     } catch (e) {
-                        console.error('Stream error:', e);
-                        return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen. Video möglicherweise blockiert.');
+                        console.error('Stream error:', e.message);
+                        return interaction.editReply(`❌ Konnte Audio-Stream nicht erstellen:\n\`\`\`${e.message}\`\`\``);
                     }
 
                     if (!stream) {
@@ -4114,11 +4122,6 @@ client.on('guildMemberAdd', async member => {
                     // Create player
                     const player = createAudioPlayer();
                     connection.subscribe(player);
-
-                    // Get title and duration
-                    const title = info?.videoDetails?.title || info?.title || 'Audio';
-                    const duration = info?.videoDetails?.lengthSeconds || info?.duration || 0;
-                    const durationStr = duration ? `${Math.floor(duration / 60)}:${(duration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
 
                     // Create and play resource
                     try {
