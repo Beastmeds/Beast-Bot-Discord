@@ -26,6 +26,9 @@ const client = new Client({
     ],
 });
 
+// Increase max listeners to avoid MaxListenersExceededWarning during development
+try { client.setMaxListeners && client.setMaxListeners(20); } catch (_) {}
+
 // Global error handlers — prevent process from crashing on Discord API timing issues
 process.on('unhandledRejection', (reason, p) => {
     console.error('Unhandled Rejection at:', p, 'reason:', reason && (reason.stack || reason));
@@ -4130,12 +4133,14 @@ client.on('guildMemberAdd', async member => {
                                 } catch (err) {
                                     console.error('URL fallback error:', err.message);
                                     console.error(err.stack);
+                                    try { await interaction.channel.send({ content: `Ich konnte nicht in Voice abspielen. Hier der Link: ${query}` }); } catch (_) {}
                                     return interaction.editReply(`❌ Fehler beim Stream: ${e.message}\nFallback-Fehler: ${err.message}`);
                                 }
                             }
 
                         } catch (e) {
                             console.error('URL validation error:', e.message);
+                            try { await interaction.channel.send({ content: `Ich konnte nicht in Voice abspielen. Hier der Link: ${query}` }); } catch (_) {}
                             return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
                         }
                     } else {
@@ -4172,6 +4177,7 @@ client.on('guildMemberAdd', async member => {
                                 } catch (err) {
                                     console.error('Search fallback error:', err.message);
                                     console.error(err.stack);
+                                    try { await interaction.channel.send({ content: `Ich konnte nicht in Voice abspielen. Hier der Link: ${result?.url || query}` }); } catch (_) {}
                                     return interaction.editReply(`❌ Fehler beim Stream: ${e.message}\nFallback-Fehler: ${err.message}`);
                                 }
                             }
