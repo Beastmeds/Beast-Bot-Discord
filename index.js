@@ -4054,17 +4054,55 @@ client.on('guildMemberAdd', async member => {
                 const player = createAudioPlayer();
                 connection.subscribe(player);
 
-                // Versuche YouTube URL zu spielen oder fallback mit fetch
-                let audioBuffer = null;
-                
+                // Handle YouTube URLs
                 if (url.includes('youtube.com') || url.includes('youtu.be')) {
-                    // Für YouTube URLs: Nutze youtube-dl oder yt-dlp Fallback
-                    return interaction.editReply({
-                        content: '⏳ YouTube-Integration erfordert `yt-dlp`. Installiere es mit: `pip install yt-dlp`\n\nOder nutze einen direkten Audio-Link (MP3/WAV).',
-                        flags: MessageFlags.Ephemeral
-                    });
+                    try {
+                        await interaction.editReply('🔄 Lade YouTube Video...');
+                        
+                        const play = await import('play-dl');
+                        
+                        // Validate YouTube URL
+                        if (!await play.default.validate(url)) {
+                            return interaction.editReply('❌ Ungültige YouTube URL!');
+                        }
+
+                        // Get stream
+                        const stream = await play.default.stream(url);
+                        if (!stream) {
+                            return interaction.editReply('❌ Konnte den Stream nicht abrufen. Video möglicherweise blockiert oder nicht verfügbar.');
+                        }
+
+                        // Create resource from stream
+                        const resource = createAudioResource(stream.stream, {
+                            inputType: stream.type,
+                            metadata: {
+                                title: stream.video_details?.title || 'Unknown',
+                                duration: stream.video_details?.durationInSec || 0
+                            }
+                        });
+
+                        player.play(resource);
+                        
+                        const title = stream.video_details?.title || 'YouTube Video';
+                        const duration = stream.video_details?.durationInSec ? `${Math.floor(stream.video_details.durationInSec / 60)}:${(stream.video_details.durationInSec % 60).toString().padStart(2, '0')}` : 'Unbekannt';
+                        
+                        await interaction.editReply(`🎵 **Jetzt abspielend:** ${title}\n⏱️ Dauer: ${duration}\n🔊 Lautstärke: ${volume}%`);
+                        
+                        player.on(AudioPlayerStatus.Idle, () => {
+                            try { connection.destroy(); } catch(_){}
+                        });
+
+                        player.on('error', (error) => {
+                            console.error('Player error:', error);
+                            try { interaction.followUp({ content: '❌ Fehler beim Abspielen!', flags: MessageFlags.Ephemeral }); } catch(_){}
+                        });
+
+                    } catch (e) {
+                        console.error('YouTube play error', e);
+                        return interaction.editReply(`❌ Fehler beim Abspielen von YouTube:\n\`\`\`${e.message}\`\`\``);
+                    }
                 } else if (url.startsWith('http')) {
-                    // Direkter Audio-Link
+                    // Direkter Audio-Link (MP3, WAV, etc.)
                     try {
                         const resource = createAudioResource(url, { inputType: StreamType.Arbitrary });
                         player.play(resource);
@@ -4079,9 +4117,9 @@ client.on('guildMemberAdd', async member => {
                         return interaction.editReply('❌ Fehler beim Abspielen der Audio-Datei. Stelle sicher, dass die URL erreichbar ist.');
                     }
                 } else {
-                    // Fallback: Text message with info
+                    // Fallback: Info message
                     await interaction.editReply({
-                        content: `🎵 **Music Player aktiv**\n\nNutze bitte direkte Audio-Links (MP3/WAV) oder YouTube-URLs.\n\n**Beispiel:**\n\`/play url:https://example.com/song.mp3\`\n\nFür YouTube wird yt-dlp benötigt (siehe Installationsanleitung).`
+                        content: `🎵 **Music Player**\n\n**Unterstützte Formate:**\n• YouTube URLs (youtube.com oder youtu.be)\n• Direkte Audio-Links (MP3, WAV, etc.)\n\n**Beispiele:**\n\`/play url:https://www.youtube.com/watch?v=...\`\n\`/play url:https://example.com/song.mp3\``
                     });
                 }
 
