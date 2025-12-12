@@ -4663,58 +4663,8 @@ client.on('guildMemberAdd', async member => {
         }
     });
 
-            // Streamer management commands (/streamer ...)
-            const twitchTokenCache = { token: null, expiresAt: 0 };
-
-            async function getTwitchAppToken(cfg) {
-                if (!cfg || !cfg.twitchClientId || !cfg.twitchClientSecret) return null;
-                const now = Date.now();
-                if (twitchTokenCache.token && twitchTokenCache.expiresAt > now + 5000) return twitchTokenCache.token;
-                try {
-                    const res = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${cfg.twitchClientId}&client_secret=${cfg.twitchClientSecret}&grant_type=client_credentials`, { method: 'POST' });
-                    const data = await res.json();
-                    if (data && data.access_token) {
-                        twitchTokenCache.token = data.access_token;
-                        twitchTokenCache.expiresAt = now + ((data.expires_in || 3600) * 1000);
-                        return twitchTokenCache.token;
-                    }
-                } catch (e) { console.error('getTwitchAppToken error', e); }
-                return null;
-            }
-
-            async function twitchGetUserByLogin(login, cfg) {
-                try {
-                    const token = await getTwitchAppToken(cfg);
-                    if (!token) return null;
-                    const url = `https://api.twitch.tv/helix/users?login=${encodeURIComponent(login)}`;
-                    const r = await fetch(url, { headers: { 'Client-ID': cfg.twitchClientId, Authorization: `Bearer ${token}` } });
-                    const j = await r.json();
-                    return (j && j.data && j.data[0]) ? j.data[0] : null;
-                } catch (e) { console.error('twitchGetUserByLogin error', e); return null; }
-            }
-
-            async function twitchGetStreamByUserId(id, cfg) {
-                try {
-                    const token = await getTwitchAppToken(cfg);
-                    if (!token) return null;
-                    const url = `https://api.twitch.tv/helix/streams?user_id=${encodeURIComponent(id)}`;
-                    const r = await fetch(url, { headers: { 'Client-ID': cfg.twitchClientId, Authorization: `Bearer ${token}` } });
-                    const j = await r.json();
-                    return (j && j.data && j.data[0]) ? j.data[0] : null;
-                } catch (e) { console.error('twitchGetStreamByUserId error', e); return null; }
-            }
-
-            async function twitchGetGameById(id, cfg) {
-                try {
-                    const token = await getTwitchAppToken(cfg);
-                    if (!token) return null;
-                    const url = `https://api.twitch.tv/helix/games?id=${encodeURIComponent(id)}`;
-                    const r = await fetch(url, { headers: { 'Client-ID': cfg.twitchClientId, Authorization: `Bearer ${token}` } });
-                    const j = await r.json();
-                    return (j && j.data && j.data[0]) ? j.data[0] : null;
-                } catch (e) { console.error('twitchGetGameById error', e); return null; }
-            }
-
+            // Streamer helpers: reuse the global `getTwitchAppToken` / `getTwitchStatus` defined earlier
+            // keep a small duration formatter used by streamer status
             function fmtDuration(startedAt) {
                 try {
                     const s = Date.parse(startedAt);
@@ -4780,20 +4730,31 @@ client.on('guildMemberAdd', async member => {
                     // actions that query Twitch API require a name
                     if (!name) return interaction.reply({ content: 'Bitte gib den Twitch-Namen an (option name).', flags: MessageFlags.Ephemeral });
 
-                    const user = await twitchGetUserByLogin(name, cfg[interaction.guild.id] || cfg._global || cfg);
-                    if (!user) return interaction.reply({ content: `Streamer **${name}** nicht gefunden auf Twitch.`, flags: MessageFlags.Ephemeral });
+                    const creds = cfg[interaction.guild.id] || cfg._global || cfg;
+                    const stat = await getTwitchStatus(creds.twitchClientId, creds.twitchClientSecret, name);
+                    if (!stat || stat.error) return interaction.reply({ content: `Streamer **${name}** nicht gefunden auf Twitch.`, flags: MessageFlags.Ephemeral });
+                    const user = stat.user;
 
                     if (action === 'live') {
-                        const stream = await twitchGetStreamByUserId(user.id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        // stat may already contain stream info
+                        let stream = stat.stream;
+                        if (!stream) {
+                            const stat2 = await getTwitchStatus(creds.twitchClientId, creds.twitchClientSecret, name);
+                            stream = stat2 && stat2.stream ? stat2.stream : null;
+                        }
                         if (!stream) return interaction.reply({ content: `❌ **${user.login}** ist derzeit nicht live.`, flags: MessageFlags.Ephemeral });
-                        const game = await twitchGetGameById(stream.game_id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        const game = stream.game_id ? await getTwitchStatus(creds.twitchClientId, creds.twitchClientSecret, name).then(s=>s ? s.game : null).catch(()=>null) : null;
                         return interaction.reply({ content: `✅ **${user.login}** ist live!\nTitle: ${stream.title}\nGame: ${game ? game.name : 'Unknown'}\nViewers: ${stream.viewer_count}`, flags: MessageFlags.Ephemeral });
                     }
 
                     if (action === 'status') {
-                        const stream = await twitchGetStreamByUserId(user.id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        let stream = stat.stream;
+                        if (!stream) {
+                            const stat2 = await getTwitchStatus(creds.twitchClientId, creds.twitchClientSecret, name);
+                            stream = stat2 && stat2.stream ? stat2.stream : null;
+                        }
                         if (!stream) return interaction.reply({ content: `❌ **${user.login}** ist derzeit nicht live.`, flags: MessageFlags.Ephemeral });
-                        const game = await twitchGetGameById(stream.game_id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        const game = stream.game_id ? await getTwitchStatus(creds.twitchClientId, creds.twitchClientSecret, name).then(s=>s ? s.game : null).catch(()=>null) : null;
                         const duration = fmtDuration(stream.started_at);
                         const thumb = (stream.thumbnail_url || '').replace('{width}', '1280').replace('{height}', '720');
                         const out = `📺 **${user.login}** ist live!\nTitle: ${stream.title}\nGame: ${game ? game.name : 'Unknown'}\nViewers: ${stream.viewer_count}\nDauer: ${duration}\nThumbnail: ${thumb}`;
@@ -4801,7 +4762,11 @@ client.on('guildMemberAdd', async member => {
                     }
 
                     if (action === 'preview') {
-                        const stream = await twitchGetStreamByUserId(user.id, cfg[interaction.guild.id] || cfg._global || cfg);
+                        let stream = stat.stream;
+                        if (!stream) {
+                            const stat2 = await getTwitchStatus(creds.twitchClientId, creds.twitchClientSecret, name);
+                            stream = stat2 && stat2.stream ? stat2.stream : null;
+                        }
                         if (!stream) return interaction.reply({ content: `❌ **${user.login}** ist derzeit nicht live.`, flags: MessageFlags.Ephemeral });
                         const thumb = (stream.thumbnail_url || '').replace('{width}', '1280').replace('{height}', '720');
                         try {
