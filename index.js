@@ -28,6 +28,9 @@ const client = new Client({
     ],
 });
 
+// increase max listeners to avoid MaxListenersExceededWarning when many handlers are registered
+try { client.setMaxListeners && client.setMaxListeners(50); } catch(_) {}
+
 // Global error handlers — prevent process from crashing on Discord API timing issues
 process.on('unhandledRejection', (reason, p) => {
     console.error('Unhandled Rejection at:', p, 'reason:', reason && (reason.stack || reason));
@@ -4351,7 +4354,26 @@ client.on('guildMemberAdd', async member => {
                 });
             }
 
-            await interaction.deferReply();
+            let interactionValid = true;
+            try {
+                await interaction.deferReply();
+            } catch (err) {
+                interactionValid = false;
+                console.warn('deferReply failed (interaction possibly expired):', err && (err.message || err.code));
+            }
+
+            const safeEditReply = async (text) => {
+                try {
+                    if (interactionValid) {
+                        await interaction.editReply(text);
+                        return;
+                    }
+                } catch (e) {
+                    interactionValid = false;
+                    console.warn('editReply failed, falling back to channel.send', e && e.message);
+                }
+                try { await interaction.channel.send(text); } catch (_) {}
+            };
 
             try {
                 // Hole den gespeicherten Voice-Channel
@@ -4360,15 +4382,15 @@ client.on('guildMemberAdd', async member => {
                 const voiceChannelId = gcfg.voiceChannelId;
 
                 if (!voiceChannelId) {
-                    return interaction.editReply('❌ Kein Voice-Channel konfiguriert. Nutze zuerst `/voice` um einen zu erstellen.');
+                    return safeEditReply('❌ Kein Voice-Channel konfiguriert. Nutze zuerst `/voice` um einen zu erstellen.');
                 }
 
                 const voiceChannel = await interaction.guild.channels.fetch(voiceChannelId).catch(() => null);
                 if (!voiceChannel || voiceChannel.type !== ChannelType.GuildVoice) {
-                    return interaction.editReply('❌ Der konfigurierte Voice-Channel existiert nicht mehr. Erstelle einen neuen mit `/voice`.');
+                    return safeEditReply('❌ Der konfigurierte Voice-Channel existiert nicht mehr. Erstelle einen neuen mit `/voice`.');
                 }
 
-                await interaction.editReply('🔄 Suche und lade Musik...');
+                await safeEditReply('🔄 Suche und lade Musik...');
 
                 try {
                     // New behaviour: no Voice required. Download audio and send as attachment in the text channel.
@@ -4403,7 +4425,7 @@ client.on('guildMemberAdd', async member => {
 
                     if (!finalUrl) {
                         try { await interaction.channel.send({ content: `Ich konnte keinen direkten Abspiel-Link finden. Hier ist dein Suchbegriff: ${query}` }); } catch (_) {}
-                        return interaction.editReply('❌ Konnte keinen Link zum Abspielen finden.');
+                        return safeEditReply('❌ Konnte keinen Link zum Abspielen finden.');
                     }
 
                     // Prepare tmp dir and file
@@ -4419,7 +4441,7 @@ client.on('guildMemberAdd', async member => {
                     } catch (e) {
                         console.error('stream fetch failed', e && e.message);
                         try { await interaction.channel.send({ content: `Ich konnte die Audiodaten nicht laden. Hier der Link: ${finalUrl}` }); } catch (_) {}
-                        return interaction.editReply(`❌ Fehler beim Stream: ${e && e.message}`);
+                        return safeEditReply(`❌ Fehler beim Stream: ${e && e.message}`);
                     }
 
                     const readable = streamResult.stream || streamResult;
@@ -4437,10 +4459,10 @@ client.on('guildMemberAdd', async member => {
                         await Promise.race([pumpPromise, new Promise((_, rej) => setTimeout(() => rej(new Error('write timeout')), 30000))]);
                     } catch (e) {
                         console.error('writing file failed', e && e.message);
-                        try { await interaction.channel.send({ content: `Stream too slow or failed. Here is the link: ${finalUrl}` }); } catch(_){}
-                        try { if (!finished) out.destroy(); } catch(_){}
-                        try { await fs.unlink(filePath); } catch(_){}
-                        return interaction.editReply(`❌ Fehler beim Herunterladen der Audiodaten: ${e && e.message}`);
+                        try { await interaction.channel.send({ content: `Stream too slow or failed. Here is the link: ${finalUrl}` }); } catch(_){ }
+                        try { if (!finished) out.destroy(); } catch(_){ }
+                        try { await fs.unlink(filePath); } catch(_){ }
+                        return safeEditReply(`❌ Fehler beim Herunterladen der Audiodaten: ${e && e.message}`);
                     }
 
                     // Send the downloaded file to the channel
@@ -4830,6 +4852,15 @@ client.on('guildMemberAdd', async member => {
         console.log(`✅ Bot ist online und ready als ${client.user.tag}`);
         console.log(`👥 Bot ist auf ${client.guilds.cache.size} Servern aktiv`);
         client.user.setActivity('Musik abspielen 🎵', { type: 'LISTENING' });
+    });
+
+    // also listen for clientReady (future event name) to avoid deprecation warnings
+    client.on('clientReady', () => {
+        try {
+            console.log(`✅ (clientReady) Bot ist online und ready als ${client.user.tag}`);
+            console.log(`👥 Bot ist auf ${client.guilds.cache.size} Servern aktiv`);
+            client.user.setActivity('Musik abspielen 🎵', { type: 'LISTENING' });
+        } catch (e) { console.warn('clientReady handler error', e && e.message); }
     });
 
     client.login(process.env.DISCORD_TOKEN).catch(error => {
