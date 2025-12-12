@@ -4538,9 +4538,26 @@ client.on('guildMemberAdd', async member => {
                     streamerCount = gcfg.streamers.length;
                     autoUpdateCount = gcfg.streamers.filter(s => s && s.autoUpdate).length;
                 }
+                // music state info
+                try {
+                    const ms = getMusicState(interaction.guild.id);
+                    if (ms) {
+                        musicStatus = ms.playing ? 'Playing' : (ms.paused ? 'Paused' : 'Idle');
+                        musicNow = (ms.current && ms.current.item) ? ms.current.item.title : '—';
+                        musicQueue = Array.isArray(ms.queue) ? ms.queue.length : 0;
+                        musicVolume = (ms.current && ms.current.item && typeof ms.current.item.volume !== 'undefined') ? ms.current.item.volume : (ms.queue && ms.queue[0] && ms.queue[0].volume ? ms.queue[0].volume : 100);
+                    }
+                } catch (e) {
+                    console.warn('info: failed to load music state', e && e.message);
+                }
             } catch (e) {
                 console.warn('info: failed to load streamer stats', e && e.message);
             }
+            // music placeholders (in case loadConfig failed above)
+            let musicStatus = typeof musicStatus !== 'undefined' ? musicStatus : 'Idle';
+            let musicNow = typeof musicNow !== 'undefined' ? musicNow : '—';
+            let musicQueue = typeof musicQueue !== 'undefined' ? musicQueue : 0;
+            let musicVolume = typeof musicVolume !== 'undefined' ? musicVolume : 100;
 
             const infoEmbed = {
                 title: '🤖 Beast Bot - Informationen',
@@ -4580,6 +4597,11 @@ client.on('guildMemberAdd', async member => {
                     {
                         name: '🔴 Streamer',
                         value: `\`${streamerCount} überwacht (Auto: ${autoUpdateCount})\``,
+                        inline: true
+                    },
+                    {
+                        name: '🎵 Music',
+                        value: `\`${musicStatus}\` Now: ${musicNow} | Queue: ${musicQueue} | Vol: ${musicVolume}%`,
                         inline: true
                     },
                     {
