@@ -4064,14 +4064,30 @@ client.on('guildMemberAdd', async member => {
                                 return interaction.editReply(`❌ URL ist ungültig oder nicht unterstützt.`);
                             }
 
-                            console.log(`🎵 Streaming URL: ${query}`);
-                            const streamResult = await playdl.default.stream(query);
-                            stream = streamResult.stream;
-                            videoTitle = streamResult.info?.videoDetails?.title || streamResult.info?.title || query;
-                            videoDuration = streamResult.info?.videoDetails?.lengthSeconds || 0;
+                            try {
+                                console.log(`🎵 Streaming URL: ${query}`);
+                                const streamResult = await playdl.default.stream(query);
+                                stream = streamResult.stream;
+                                videoTitle = streamResult.info?.videoDetails?.title || streamResult.info?.title || query;
+                                videoDuration = streamResult.info?.videoDetails?.lengthSeconds || 0;
+                            } catch (e) {
+                                console.warn('URL stream error:', e.message);
+                                // Fallback: try a ytsearch by extracting possible keywords from URL
+                                const fallbackQuery = query;
+                                try {
+                                    console.log(`🔁 Falling back to ytsearch for: ${fallbackQuery}`);
+                                    const fallback = await playdl.default.stream(`ytsearch:${fallbackQuery}`);
+                                    stream = fallback.stream;
+                                    videoTitle = fallback.info?.videoDetails?.title || fallback.info?.title || videoTitle;
+                                    videoDuration = fallback.info?.videoDetails?.lengthSeconds || videoDuration;
+                                } catch (err) {
+                                    console.error('URL fallback error:', err.message);
+                                    return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
+                                }
+                            }
 
                         } catch (e) {
-                            console.error('URL stream error:', e.message);
+                            console.error('URL validation error:', e.message);
                             return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
                         }
                     } else {
@@ -4087,11 +4103,24 @@ client.on('guildMemberAdd', async member => {
                             const result = results[0];
                             console.log(`✅ Found: ${result.title} (${result.url})`);
                             
-                            // Get stream
-                            const streamResult = await playdl.default.stream(result.url);
-                            stream = streamResult.stream;
-                            videoTitle = result.title || 'Audio';
-                            videoDuration = result.durationMs ? Math.floor(result.durationMs / 1000) : 0;
+                            // Get stream, with fallback to ytsearch if result.url fails
+                            try {
+                                const streamResult = await playdl.default.stream(result.url);
+                                stream = streamResult.stream;
+                                videoTitle = result.title || 'Audio';
+                                videoDuration = result.durationMs ? Math.floor(result.durationMs / 1000) : 0;
+                            } catch (e) {
+                                console.warn('Stream from result.url failed, trying ytsearch fallback:', e.message);
+                                try {
+                                    const fallback = await playdl.default.stream(`ytsearch:${query}`);
+                                    stream = fallback.stream;
+                                    videoTitle = fallback.info?.videoDetails?.title || fallback.info?.title || result.title || 'Audio';
+                                    videoDuration = fallback.info?.videoDetails?.lengthSeconds || 0;
+                                } catch (err) {
+                                    console.error('Search fallback error:', err.message);
+                                    return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${err.message}\`\`\``);
+                                }
+                            }
 
                         } catch (e) {
                             console.error('Search error:', e.message);
