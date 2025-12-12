@@ -5,6 +5,7 @@ import { REST } from '@discordjs/rest';
 import fetch from 'node-fetch';
 import Canvas from 'canvas';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import express from 'express';
 // Bot startup time tracker
@@ -4045,106 +4046,88 @@ client.on('guildMemberAdd', async member => {
                 await interaction.editReply('🔄 Suche und lade Musik...');
 
                 try {
-                    const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
+                    // New behaviour: no Voice required. Download audio and send as attachment in the text channel.
                     const playdl = await import('play-dl');
 
-                    let stream = null;
+                    let finalUrl = null;
                     let videoTitle = 'Audio';
                     let videoDuration = 0;
 
-                    const isUrl = query.startsWith('http://') || query.startsWith('https://');
+                    const isUrl = query && (query.startsWith('http://') || query.startsWith('https://'));
 
                     if (isUrl) {
-                        // Direct URL - validate and stream
                         try {
-                            console.log(`📍 Validating URL: ${query}`);
-                            const isValid = await playdl.default.validate(query);
-                            
-                            if (!isValid) {
-                                return interaction.editReply(`❌ URL ist ungültig oder nicht unterstützt.`);
-                            }
+                            const valid = await playdl.default.validate(query);
+                            if (valid) finalUrl = query;
+                        } catch (e) { console.warn('validate failed', e && e.message); }
+                    }
 
-                            console.log(`🎵 Streaming URL: ${query}`);
-                            const streamResult = await playdl.default.stream(query);
-                            stream = streamResult.stream;
-                            videoTitle = streamResult.info?.videoDetails?.title || streamResult.info?.title || query;
-                            videoDuration = streamResult.info?.videoDetails?.lengthSeconds || 0;
-
-                        } catch (e) {
-                            console.error('URL stream error:', e.message);
-                            return interaction.editReply(`❌ Fehler beim Stream:\n\`\`\`${e.message}\`\`\``);
-                        }
-                    } else {
-                        // Search for song
+                    if (!finalUrl) {
+                        // search for query and use first result
                         try {
-                            console.log(`🔍 Searching for: ${query}`);
                             const results = await playdl.default.search(query, { limit: 1 });
-                            
-                            if (!results || results.length === 0) {
-                                return interaction.editReply(`❌ Kein Lied gefunden für: **${query}**`);
+                            if (results && results.length > 0) {
+                                finalUrl = results[0].url;
+                                videoTitle = results[0].title || videoTitle;
+                                videoDuration = results[0].durationMs ? Math.floor(results[0].durationMs / 1000) : 0;
                             }
-
-                            const result = results[0];
-                            console.log(`✅ Found: ${result.title} (${result.url})`);
-                            
-                            // Get stream
-                            const streamResult = await playdl.default.stream(result.url);
-                            stream = streamResult.stream;
-                            videoTitle = result.title || 'Audio';
-                            videoDuration = result.durationMs ? Math.floor(result.durationMs / 1000) : 0;
-
                         } catch (e) {
-                            console.error('Search error:', e.message);
-                            return interaction.editReply(`❌ Fehler bei der Suche:\n\`\`\`${e.message}\`\`\``);
+                            console.error('search failed', e && e.message);
                         }
                     }
 
-                    if (!stream) {
-                        return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen.');
+                    if (!finalUrl) {
+                        try { await interaction.channel.send({ content: `Ich konnte keinen direkten Abspiel-Link finden. Hier ist dein Suchbegriff: ${query}` }); } catch (_) {}
+                        return interaction.editReply('❌ Konnte keinen Link zum Abspielen finden.');
                     }
 
-                    // Connect to voice channel
-                    const connection = joinVoiceChannel({
-                        channelId: voiceChannel.id,
-                        guildId: voiceChannel.guild.id,
-                        adapterCreator: voiceChannel.guild.voiceAdapterCreator
+                    // Prepare tmp dir and file
+                    const tmpDir = path.join(process.cwd(), 'tmp');
+                    await fs.mkdir(tmpDir, { recursive: true }).catch(() => {});
+                    const id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,8);
+                    const filePath = path.join(tmpDir, `${id}.mp4`);
+
+                    // Get stream and write to file
+                    let streamResult = null;
+                    try {
+                        streamResult = await playdl.default.stream(finalUrl);
+                    } catch (e) {
+                        console.error('stream fetch failed', e && e.message);
+                        try { await interaction.channel.send({ content: `Ich konnte die Audiodaten nicht laden. Hier der Link: ${finalUrl}` }); } catch (_) {}
+                        return interaction.editReply(`❌ Fehler beim Stream: ${e && e.message}`);
+                    }
+
+                    const readable = streamResult.stream || streamResult;
+                    const out = fsSync.createWriteStream(filePath);
+                    let finished = false;
+                    const pumpPromise = new Promise((resolve, reject) => {
+                        readable.pipe(out);
+                        out.on('finish', () => { finished = true; resolve(); });
+                        out.on('error', reject);
+                        readable.on('error', reject);
                     });
 
-                    // Create player
-                    const player = createAudioPlayer();
-                    connection.subscribe(player);
-
-                    // Format duration
-                    const durationStr = videoDuration ? `${Math.floor(videoDuration / 60)}:${(videoDuration % 60).toString().padStart(2, '0')}` : 'Unbekannt';
-
-                    // Create and play resource
+                    // wait up to 30s for the file to finish writing
                     try {
-                        const resource = createAudioResource(stream, {
-                            inputType: StreamType.Arbitrary,
-                            metadata: { title: videoTitle, duration: videoDuration }
-                        });
-
-                        player.play(resource);
-
-                        await interaction.editReply(
-                            `🎵 **${videoTitle}**\n` +
-                            `⏱️ Dauer: ${durationStr}\n` +
-                            `🔊 Lautstärke: ${volume}%\n\n` +
-                            `✅ Wird jetzt abgespielt!`
-                        );
-
-                        // Handle end of stream
-                        player.on(AudioPlayerStatus.Idle, () => {
-                            try { connection.destroy(); } catch (_) {}
-                        });
-
-                        player.on('error', (error) => {
-                            console.error('Player error:', error);
-                        });
-
+                        await Promise.race([pumpPromise, new Promise((_, rej) => setTimeout(() => rej(new Error('write timeout')), 30000))]);
                     } catch (e) {
-                        console.error('Resource creation error:', e);
-                        return interaction.editReply(`❌ Fehler beim Abspielen:\n\`\`\`${e.message}\`\`\``);
+                        console.error('writing file failed', e && e.message);
+                        try { await interaction.channel.send({ content: `Stream too slow or failed. Here is the link: ${finalUrl}` }); } catch(_){}
+                        try { if (!finished) out.destroy(); } catch(_){}
+                        try { await fs.unlink(filePath); } catch(_){}
+                        return interaction.editReply(`❌ Fehler beim Herunterladen der Audiodaten: ${e && e.message}`);
+                    }
+
+                    // Send the downloaded file to the channel
+                    try {
+                        await interaction.editReply({ content: `🎵 **${videoTitle}** — lade Audiodatei hoch...` });
+                        await interaction.followUp({ files: [filePath] });
+                    } catch (e) {
+                        console.error('send file failed', e && e.message);
+                        try { await interaction.channel.send({ content: `Ich konnte die Datei nicht hochladen. Hier ist der Link: ${finalUrl}` }); } catch(_){}
+                        return interaction.editReply(`❌ Fehler beim Hochladen der Datei: ${e && e.message}`);
+                    } finally {
+                        try { await fs.unlink(filePath); } catch(_){}
                     }
 
                 } catch (e) {
