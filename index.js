@@ -4015,7 +4015,7 @@ client.on('guildMemberAdd', async member => {
             if (interaction.__blocked) return;
             if (interaction.commandName !== 'play') return;
 
-            const url = interaction.options.getString('url');
+            const query = interaction.options.getString('url');
             const volume = interaction.options.getInteger('volume') || 50;
 
             if (volume < 0 || volume > 100) {
@@ -4047,38 +4047,61 @@ client.on('guildMemberAdd', async member => {
                 try {
                     const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = await import('@discordjs/voice');
                     const ytdl = await import('ytdl-core');
+                    const playdl = await import('play-dl');
 
-                    // Get stream from ytdl-core
-                    let stream = null;
+                    // Determine if query is a URL or search term
+                    let url = null;
                     let info = null;
 
-                    try {
-                        // Get info
-                        info = await ytdl.default.getInfo(url).catch(e => {
-                            console.warn('getInfo failed:', e.message);
-                            return null;
-                        });
+                    const isUrl = query.startsWith('http://') || query.startsWith('https://');
 
-                        if (!info) {
-                            return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
+                    if (isUrl) {
+                        // Direct URL provided
+                        url = query;
+                        try {
+                            info = await ytdl.default.getInfo(url).catch(e => {
+                                console.warn('getInfo failed:', e.message);
+                                return null;
+                            });
+                        } catch (e) {
+                            console.warn('ytdl getInfo error:', e.message);
                         }
+                    } else {
+                        // Search for song on YouTube
+                        try {
+                            const results = await playdl.default.search(query, { limit: 1 });
+                            if (!results || results.length === 0) {
+                                return interaction.editReply(`❌ Kein Lied gefunden für: **${query}**`);
+                            }
+                            url = results[0].url;
+                            info = await ytdl.default.getInfo(url).catch(e => {
+                                console.warn('getInfo failed after search:', e.message);
+                                return null;
+                            });
+                        } catch (e) {
+                            console.error('Search error:', e.message);
+                            return interaction.editReply(`❌ Fehler bei der Suche:\n\`\`\`${e.message}\`\`\``);
+                        }
+                    }
 
-                        // Create stream with audio format
+                    if (!info) {
+                        return interaction.editReply('❌ Konnte Video-Informationen nicht laden. URL möglicherweise ungültig oder Video nicht verfügbar.');
+                    }
+
+                    // Create stream with audio format
+                    let stream = null;
+                    try {
                         stream = ytdl.default(url, {
                             quality: 'highestaudio',
                             highWaterMark: 1 << 25
-                        }).catch(e => {
-                            console.error('Stream error:', e);
-                            return null;
                         });
-
-                        if (!stream) {
-                            return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen. Video möglicherweise blockiert.');
-                        }
-
                     } catch (e) {
-                        console.error('ytdl-core error:', e.message);
-                        return interaction.editReply(`❌ Fehler beim Laden der Musik:\n\`\`\`${e.message}\`\`\``);
+                        console.error('Stream error:', e);
+                        return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen. Video möglicherweise blockiert.');
+                    }
+
+                    if (!stream) {
+                        return interaction.editReply('❌ Konnte Audio-Stream nicht erstellen. Video möglicherweise blockiert.');
                     }
 
                     // Connect to voice channel
