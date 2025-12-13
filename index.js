@@ -853,8 +853,12 @@ client.once('ready', async () => {
         } else {
             console.log('Startup animation: no Beastmeds guild configured (cfg._global.guildId missing).');
         }
-        // Attempt to notify owners via DM (best-effort). This won't block startup.
-        try { sendStartupDMsToOwners(cfg).catch(()=>null); } catch (e) { console.warn('sendStartupDMsToOwners invocation error', e && e.message); }
+        // Attempt to notify owners via DM (best-effort) — await to ensure delivery attempt logs appear
+        try {
+            try { console.log('Invoking sendStartupDMsToOwners'); } catch (_) {}
+            await sendStartupDMsToOwners(cfg).catch(()=>null);
+            try { console.log('Completed sendStartupDMsToOwners'); } catch (_) {}
+        } catch (e) { console.warn('sendStartupDMsToOwners invocation error', e && e.message); }
     } catch (e) {
         console.error('startup animation dispatch error', e);
     }
