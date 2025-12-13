@@ -697,6 +697,22 @@ client.once('ready', async () => {
     } catch (e) {
         console.error('Failed to start scheduler:', e);
     }
+    try {
+        // Send startup animation to guilds that configured an announce channel
+        const cfg = await loadConfig();
+        for (const [gid, gcfg] of Object.entries(cfg)) {
+            if (gid === '_global') continue;
+            try {
+                const announceId = gcfg && gcfg.announceChannelId;
+                if (!announceId) continue;
+                // fire and forget but throttle a bit to avoid rate limits
+                sendStartupAnimationToChannel(gid, announceId);
+                await new Promise(r => setTimeout(r, 900));
+            } catch (e) { /* ignore per-guild errors */ }
+        }
+    } catch (e) {
+        console.error('startup animation dispatch error', e);
+    }
 });
 
 // Early interaction guard: owner-only mode and disabled commands
@@ -1066,6 +1082,16 @@ const commands = [
         name: 'roleinfo',
         description: 'Informationen über eine Rolle',
         options: [{ name: 'role', description: 'Rolle', type: 8, required: true }]
+    },
+    {
+        name: 'role',
+        description: 'Gib oder entferne eine Rolle von einem User (optional temporär)',
+        options: [
+            { name: 'action', description: 'Aktion', type: 3, required: true, choices: [ { name: 'add', value: 'add' }, { name: 'remove', value: 'remove' } ] },
+            { name: 'user', description: 'Ziel-User', type: 6, required: true },
+            { name: 'role', description: 'Rolle', type: 8, required: true },
+            { name: 'duration', description: 'Dauer (z.B. 10m, 2h, 1d) — optional', type: 3, required: false }
+        ]
     },
     {
         name: 'serverstats',
@@ -1932,12 +1958,15 @@ async function getYouTubeStatus(apiKey, channelOrName) {
 function parseTimeString(input) {
     if (!input) return null;
     const s = String(input).trim();
-    // relative minutes/hours e.g. 10m, 2h
-    const rel = s.match(/^(\d+)([mMhH])$/);
+    // relative minutes/hours/days e.g. 10m, 2h, 1d
+    const rel = s.match(/^(\d+)([mMhHdD])$/);
     if (rel) {
         const n = parseInt(rel[1], 10);
         const unit = rel[2].toLowerCase();
-        const ms = unit === 'h' ? n * 3600 * 1000 : n * 60 * 1000;
+        let ms = 0;
+        if (unit === 'h') ms = n * 3600 * 1000;
+        else if (unit === 'd') ms = n * 24 * 3600 * 1000;
+        else ms = n * 60 * 1000;
         return Date.now() + ms;
     }
     // ISO / RFC parse
@@ -1986,6 +2015,29 @@ function startScheduler() {
                 // mark as sent by removing from list
                 cfg._global.schedules = cfg._global.schedules.filter(x => x.id !== s.id);
             }
+
+            // timedRoles: entries created by /role with a duration. Format: { guildId, userId, roleId, expiresAt }
+            try {
+                cfg._global.timedRoles = cfg._global.timedRoles || [];
+                const expiredRoles = cfg._global.timedRoles.filter(t => t.expiresAt && t.expiresAt <= now);
+                if (expiredRoles.length) {
+                    for (const tr of expiredRoles) {
+                        try {
+                            const guild = await client.guilds.fetch(tr.guildId).catch(() => null);
+                            if (!guild) continue;
+                            const member = await guild.members.fetch(tr.userId).catch(() => null);
+                            if (!member) continue;
+                            const role = guild.roles.cache.get(tr.roleId) || await guild.roles.fetch(tr.roleId).catch(() => null);
+                            if (role && member.roles && member.roles.remove) {
+                                await member.roles.remove(role.id).catch(() => null);
+                                console.log(`Removed timed role ${role.id} from ${tr.userId} in guild ${tr.guildId}`);
+                            }
+                        } catch (e) { console.error('timed role removal error', e); }
+                    }
+                    // remove expired entries
+                    cfg._global.timedRoles = cfg._global.timedRoles.filter(t => !t.expiresAt || t.expiresAt > now);
+                }
+            } catch (e) { console.error('timedRoles processing error', e); }
             await saveConfig(cfg);
         } catch (e) {
             console.error('Scheduler runOnce error', e);
@@ -1994,6 +2046,59 @@ function startScheduler() {
     runOnce();
     setInterval(runOnce, 30 * 1000);
 }
+
+// --- Startup animation helpers ---
+function buildStartupFrames() {
+    const logo = [
+        '  ____                 _   ____        _   ',
+        ' |  _ \ __ _ _ __ ___ | | | __ )  ___ | |_ ',
+        ' | |_) / _` | \\ \/ / _` | |  _ \ / _ \\| __|',
+        ' |  __/ (_| | |>  < (_| | | |_) | (_) | |_ ',
+        ' |_|   \\__,_|_/_/\\_\\__,_| |____/ \\___/ \\__|'
+    ];
+
+    const footer = '— BeastBot gestartet —';
+
+    // Create progressive frames that 'draw' the logo line by line
+    const frames = [];
+    for (let i = 0; i <= logo.length; i++) {
+        const lines = [];
+        for (let j = 0; j < i; j++) lines.push(logo[j]);
+        // animate a progress bar under the drawn part
+        const pct = Math.round((i / logo.length) * 100);
+        const barFilled = Math.round((pct / 100) * 24);
+        const bar = '█'.repeat(barFilled) + '░'.repeat(24 - barFilled);
+        lines.push('`' + bar + ' ' + pct + '%`');
+        frames.push(lines.join('\n'));
+    }
+
+    // final full logo + footer frame
+    frames.push(logo.join('\n') + '\n\n' + footer);
+    return frames;
+}
+
+async function sendStartupAnimationToChannel(guildId, channelId) {
+    try {
+        const frames = buildStartupFrames();
+        const guild = await client.guilds.fetch(guildId).catch(() => null);
+        if (!guild) return;
+        const ch = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+        if (!ch || !ch.isTextBased()) return;
+
+        // send initial frame then edit through frames
+        const m = await ch.send({ content: frames[0] }).catch(() => null);
+        if (!m) return;
+        for (let i = 1; i < frames.length; i++) {
+            await new Promise(r => setTimeout(r, 650));
+            try { await m.edit({ content: frames[i] }); } catch (e) { break; }
+        }
+    } catch (e) {
+        console.error('startup animation error for', guildId, channelId, e);
+    }
+}
+
+// Extend scheduler to handle timed role removals stored in cfg._global.timedRoles
+// We'll patch the existing startScheduler logic above to also process timedRoles on every run.
 
 // Register commands helper: registers guild-scoped commands for a given guild
 async function registerCommandsForGuild(guildId) {
@@ -2529,6 +2634,71 @@ client.on('interactionCreate', async interaction => {
                 { name: 'Mitglieder', value: String(role.members.size), inline: true }
             ]
         }]});
+    }
+
+    // /role add|remove [user] [role] [duration]
+    if (commandName === 'role') {
+        const action = interaction.options.getString('action');
+        const targetUser = interaction.options.getUser('user');
+        const roleObj = interaction.options.getRole('role');
+        const durationStr = interaction.options.getString('duration');
+
+        if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+            // allow bot owner as well
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            const isOwner = owners.has(interaction.user.id);
+            if (!isOwner) return interaction.reply({ content: 'Du brauchst die Berechtigung "Rollen verwalten" oder musst Bot-Owner sein.', flags: MessageFlags.Ephemeral });
+        }
+
+        if (!targetUser || !roleObj) return interaction.reply({ content: 'Bitte gib einen User und eine Rolle an.', flags: MessageFlags.Ephemeral });
+
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+        try {
+            const guild = interaction.guild;
+            if (!guild) return interaction.editReply('Dieser Befehl muss in einem Server verwendet werden.');
+            const member = await guild.members.fetch(targetUser.id).catch(() => null);
+            if (!member) return interaction.editReply('Ziel-User nicht auf diesem Server gefunden.');
+
+            if (action === 'add') {
+                await member.roles.add(roleObj.id).catch(e => { throw e; });
+
+                // schedule removal if duration provided
+                if (durationStr) {
+                    const ts = parseTimeString(durationStr);
+                    if (!ts) {
+                        return interaction.editReply('Ungültige Dauer. Verwende z.B. `10m`, `2h` oder `1d`.');
+                    }
+                    const cfg = await loadConfig();
+                    cfg._global = cfg._global || {};
+                    cfg._global.timedRoles = cfg._global.timedRoles || [];
+                    cfg._global.timedRoles.push({ guildId: guild.id, userId: targetUser.id, roleId: roleObj.id, expiresAt: ts, createdBy: interaction.user.id });
+                    await saveConfig(cfg);
+                    return interaction.editReply(`✅ Rolle **${roleObj.name}** wurde ${targetUser.tag} gegeben — wird entfernt am ${new Date(ts).toLocaleString()}.`);
+                }
+
+                return interaction.editReply(`✅ Rolle **${roleObj.name}** wurde ${targetUser.tag} gegeben.`);
+            }
+
+            if (action === 'remove') {
+                await member.roles.remove(roleObj.id).catch(e => { throw e; });
+                // also remove any pending timedRoles entries for this tuple
+                try {
+                    const cfg = await loadConfig();
+                    if (cfg._global && Array.isArray(cfg._global.timedRoles)) {
+                        cfg._global.timedRoles = cfg._global.timedRoles.filter(t => !(t.guildId === guild.id && t.userId === targetUser.id && t.roleId === roleObj.id));
+                        await saveConfig(cfg);
+                    }
+                } catch (e) { /* ignore save errors */ }
+                return interaction.editReply(`✅ Rolle **${roleObj.name}** von ${targetUser.tag} entfernt.`);
+            }
+
+            return interaction.editReply('Unbekannte Aktion. Verwende `add` oder `remove`.');
+        } catch (e) {
+            console.error('/role handler error', e && (e.stack || e));
+            try { return interaction.editReply('Fehler beim Ausführen des Befehls: ' + (e.message || String(e))); } catch(_){}
+        }
     }
 
     if (commandName === 'serverstats') {
