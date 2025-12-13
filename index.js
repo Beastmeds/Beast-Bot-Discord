@@ -1118,6 +1118,10 @@ const commands = [
         ]
     },
     {
+        name: 'timedroles',
+        description: 'List active timed role assignments for this guild'
+    },
+    {
         name: 'serverstats',
         description: 'Zeigt Statistiken zum Server'
     },
@@ -2020,6 +2024,27 @@ function parseTimeString(input) {
     return null;
 }
 
+// Helper: format ms or timestamp to human readable remaining time
+function formatRemaining(ts) {
+    try {
+        const now = Date.now();
+        const target = typeof ts === 'number' ? ts : (new Date(ts)).getTime();
+        if (!target || isNaN(target)) return 'n/a';
+        let diff = Math.max(0, target - now);
+        const days = Math.floor(diff / (24*3600*1000));
+        diff -= days * 24*3600*1000;
+        const hours = Math.floor(diff / (3600*1000));
+        diff -= hours * 3600*1000;
+        const mins = Math.floor(diff / (60*1000));
+        const parts = [];
+        if (days) parts.push(days + 'd');
+        if (hours) parts.push(hours + 'h');
+        if (mins) parts.push(mins + 'm');
+        if (parts.length === 0) return '< 1m';
+        return parts.join(' ');
+    } catch (e) { return 'n/a'; }
+}
+
 // Simple scheduler: executes scheduled tasks in cfg._global.schedules
 function startScheduler() {
     // run immediately then every 30s
@@ -2718,7 +2743,12 @@ client.on('interactionCreate', async interaction => {
         const serverOnly = isGerman ? 'Dieser Befehl muss in einem Server verwendet werden.' : 'This command must be used in a server.';
         const notFound = isGerman ? 'Ziel-Benutzer nicht auf diesem Server gefunden.' : 'Target user not found on this server.';
         const invalidDur = isGerman ? 'Ungültige Dauer. Verwende z.B. `10m`, `2h` oder `1d`.' : 'Invalid duration. Use e.g. `10m`, `2h` or `1d`.';
-        const addedMsg = (rname, usertag, ts) => isGerman ? `✅ Rolle **${rname}** wurde ${usertag} gegeben${ts ? ' — wird entfernt am ' + new Date(ts).toLocaleString() : '.'}` : `✅ Role **${rname}** given to ${usertag}${ts ? ' — will be removed at ' + new Date(ts).toLocaleString() : '.'}`;
+        const addedMsg = (rname, usertag, ts) => {
+            if (!ts) return isGerman ? `✅ Rolle **${rname}** wurde ${usertag} gegeben.` : `✅ Role **${rname}** given to ${usertag}.`;
+            const abs = new Date(ts).toLocaleString();
+            const rel = formatRemaining(ts);
+            return isGerman ? `✅ Rolle **${rname}** wurde ${usertag} gegeben — wird entfernt am ${abs} (${rel}).` : `✅ Role **${rname}** given to ${usertag} — will be removed at ${abs} (${rel}).`;
+        };
         const removedMsg = (rname, usertag) => isGerman ? `✅ Rolle **${rname}** von ${usertag} entfernt.` : `✅ Role **${rname}** removed from ${usertag}.`;
 
         if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
@@ -2773,6 +2803,22 @@ client.on('interactionCreate', async interaction => {
             console.error('/role/rolle handler error', e && (e.stack || e));
             try { return interaction.editReply((isGerman ? 'Fehler beim Ausführen des Befehls: ' : 'Error executing command: ') + (e.message || String(e))); } catch(_){}
         }
+    }
+
+    // /timedroles -> list active scheduled role removals for this guild
+    if (commandName === 'timedroles') {
+        if (!interaction.guild) return interaction.reply({ content: 'This command must be used in a server.', flags: MessageFlags.Ephemeral });
+        const cfg = await loadConfig();
+        const list = (cfg._global && Array.isArray(cfg._global.timedRoles)) ? cfg._global.timedRoles.filter(t => t.guildId === interaction.guild.id) : [];
+        if (!list.length) return interaction.reply({ content: 'No active timed roles found for this server.', flags: MessageFlags.Ephemeral });
+        const lines = [];
+        for (const t of list) {
+            const role = interaction.guild.roles.cache.get(t.roleId);
+            const until = new Date(t.expiresAt).toLocaleString();
+            const rem = formatRemaining(t.expiresAt);
+            lines.push(`${t.userId === interaction.user.id ? '**You**' : `<@${t.userId}>`} — ${role ? `**${role.name}**` : t.roleId} — removes in ${rem} (${until})`);
+        }
+        return interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
     }
 
     if (commandName === 'serverstats') {
