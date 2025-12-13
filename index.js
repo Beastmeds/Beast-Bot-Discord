@@ -780,21 +780,16 @@ client.once('ready', async () => {
         console.log('Registriere Slash-Commands...');
         // register global commands as well so commands are available across communities
         await registerGlobalCommands();
-        // If global registration succeeded, skip per-guild registration to avoid duplicates
-        if (GLOBAL_COMMANDS_REGISTERED) {
-            console.log('Globale Commands registriert — entferne vorhandene per-Guild-Registrierungen, um Duplikate zu vermeiden.');
-            await clearAllGuildCommands();
-        } else {
-            // Versuche alle Gilden zu fetchen (falls nicht im Cache)
-            const fetched = await client.guilds.fetch();
-            for (const [gid] of fetched) {
-                try {
-                    await registerCommandsForGuild(gid);
-                    // kurze Pause um Rate-Limits zu schonen
-                    await new Promise(r => setTimeout(r, 750));
-                } catch (e) {
-                    console.error('Fehler beim Registrieren für Gilde', gid, e);
-                }
+        // Register per-guild commands for immediate availability in each guild.
+        // We no longer clear guild-scoped commands after global registration to ensure commands remain available.
+        const fetched = await client.guilds.fetch();
+        for (const [gid] of fetched) {
+            try {
+                await registerCommandsForGuild(gid);
+                // kurze Pause um Rate-Limits zu schonen
+                await new Promise(r => setTimeout(r, 750));
+            } catch (e) {
+                console.error('Fehler beim Registrieren für Gilde', gid, e);
             }
         }
     } catch (e) {
