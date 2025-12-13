@@ -2607,10 +2607,14 @@ async function sendStartupDMsToOwners(cfg) {
         if (cfg && cfg.ownerId) owners.add(cfg.ownerId);
         if (cfg && Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
         if (cfg && cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
-        if (owners.size === 0) return;
+        if (owners.size === 0) {
+            console.log('sendStartupDMsToOwners: no owners configured');
+            return;
+        }
+        try { console.log('sendStartupDMsToOwners: owners to notify', Array.from(owners)); } catch(_){}
         for (const id of owners) {
             try {
-                const user = await client.users.fetch(id).catch(() => null);
+                const user = await client.users.fetch(id).catch((err) => { console.warn('fetch owner err', id, err && err.message); return null; });
                 if (!user) {
                     console.warn('sendStartupDMsToOwners: owner not found', id);
                     continue;
@@ -2624,11 +2628,30 @@ async function sendStartupDMsToOwners(cfg) {
                     'Wenn du diese Nachricht nicht sehen kannst (keine DMs von Servermitgliedern erlaubt), aktiviere DMs oder gib mir eine Rolle/DM-Freigabe.'
                 ];
                 const content = '```' + '\n' + lines.join('\n') + '\n' + '```';
+                let sent = false;
                 try {
                     await user.send({ content });
+                    sent = true;
                     try { console.log('Startup DM sent to owner', id); } catch (_) {}
                 } catch (e) {
-                    console.warn('Failed sending startup DM to', id, e && e.message);
+                    console.warn('Failed sending startup DM to', id, e && (e.message || e));
+                }
+                // fallback: mention in configured announce channel if DM not deliverable
+                if (!sent) {
+                    const announceId = (cfg && cfg._global && cfg._global.channelId) || (cfg && Object.values(cfg)[0] && cfg._global && cfg._global.channelId);
+                    try {
+                        if (announceId) {
+                            const guildId = (cfg && cfg._global && cfg._global.guildId) || Object.keys(cfg)[0];
+                            const guild = await client.guilds.fetch(guildId).catch(()=>null);
+                            if (guild) {
+                                const ch = guild.channels.cache.get(announceId) || await guild.channels.fetch(announceId).catch(()=>null);
+                                if (ch && ch.isTextBased()) {
+                                    await ch.send({ content: `<@${id}> Ich konnte dir keine DM senden; du findest Beast Bot nun online.` });
+                                    try { console.log('Fallback mention sent for owner', id, 'in channel', announceId); } catch(_){}
+                                }
+                            }
+                        }
+                    } catch (err) { console.warn('sendStartupDMsToOwners fallback mention failed', err && err.message); }
                 }
             } catch (e) {
                 console.warn('sendStartupDMsToOwners: unexpected for', id, e && e.message);
