@@ -70,6 +70,19 @@ Notes:
 - Open server and test commands: `/ping`, `/hallo`, `/würfeln`, `/setup` etc.
 - If slash commands are not visible right away, wait a minute or re-register commands (or restart the bot in NodeChef).
 
+## New Economy Commands
+The bot now includes a simple economy with commands:
+- `/daily` — Tägliche Coins (24h cooldown)
+- `/work` — Arbeite für Coins (1h cooldown)
+- `/inventory` — Zeige deine Items
+- `/shop list` — Zeige Shop-Items
+- `/shop buy item:<name> [qty]` — Kaufe Item(s)
+- `/use <item>` — Benutze ein Item (z.B. potion)
+- `/rank [user]` — Zeige Level/XP eines Users
+- `/leaderboard [by=coins|level]` — Top 10 Spieler
+- `/stats` — Bot Performance
+- `/reload` — Commands neu laden (Owner only)
+
 ## Next enhancements
 - Move `guild-config.json` to a database (MongoDB recommended) for multiple-instance safety.
 - Add monitoring (Sentry or custom health checks) and auto-restart policies.

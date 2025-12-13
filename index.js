@@ -980,6 +980,49 @@ const commands = [
         description: 'Würfle eine Zahl zwischen 1 und 6'
     },
     {
+        name: 'reload',
+        description: 'Commands neu laden (Owner only)'
+    },
+    {
+        name: 'stats',
+        description: 'Bot Performance / Status anzeigen'
+    },
+    {
+        name: 'rank',
+        description: 'Zeigt dein Level und XP',
+        options: [ { name: 'user', description: 'Zeige das Level eines Users', type: 6, required: false } ]
+    },
+    {
+        name: 'leaderboard',
+        description: 'Top 10 Spieler',
+        options: [ { name: 'by', description: 'Sortiere nach coins oder level', type: 3, required: false, choices: [ { name: 'coins', value: 'coins' }, { name: 'level', value: 'level' } ] } ]
+    },
+    {
+        name: 'daily',
+        description: 'Tägliche Coins abholen'
+    },
+    {
+        name: 'work',
+        description: 'Arbeite für Geld (Cooldown)'
+    },
+    {
+        name: 'inventory',
+        description: 'Zeigt deine Items/Inventory'
+    },
+    {
+        name: 'shop',
+        description: 'Shop: Items kaufen oder Liste anzeigen',
+        options: [
+            { name: 'list', type: 1, description: 'Liste der Items' },
+            { name: 'buy', type: 1, description: 'Kaufe ein Item', options: [ { name: 'item', type: 3, description: 'Item-Name', required: true }, { name: 'qty', type: 4, description: 'Anzahl', required: false } ] }
+        ]
+    },
+    {
+        name: 'use',
+        description: 'Benutze ein Item',
+        options: [ { name: 'item', description: 'Name des Items', type: 3, required: true } ]
+    },
+    {
         name: 'server',
         description: 'Zeigt Informationen über den Server'
     },
@@ -1546,6 +1589,7 @@ const GUILD_ID = process.env.GUILD_ID;
 const CLIENT_ID = process.env.CLIENT_ID;
 
 const CONFIG_PATH = path.resolve('./guild-config.json');
+const ECONOMY_PATH = path.resolve('./data/economy.json');
 
 async function loadConfig() {
     try {
@@ -1596,6 +1640,42 @@ async function saveConfig(cfg) {
         console.error('Failed to save config:', e);
     }
 }
+
+// Economy: simple JSON-backed per-user economy
+async function loadEconomy() {
+    try {
+        const txt = await fs.readFile(ECONOMY_PATH, 'utf8');
+        return JSON.parse(txt || '{}');
+    } catch (e) {
+        if (e.code === 'ENOENT') return { users: {} };
+        console.error('Failed to load economy data:', e);
+        return { users: {} };
+    }
+}
+
+async function saveEconomy(economy) {
+    try {
+        // ensure parent dir exists
+        try { await fs.mkdir(path.dirname(ECONOMY_PATH), { recursive: true }); } catch (_) {}
+        await fs.writeFile(ECONOMY_PATH, JSON.stringify(economy, null, 2), 'utf8');
+    } catch (e) {
+        console.error('Failed to save economy data:', e);
+    }
+}
+
+function ensureUserEntry(economy, userId) {
+    if (!economy.users) economy.users = {};
+    if (!economy.users[userId]) {
+        economy.users[userId] = { coins: 0, xp: 0, lastDaily: 0, lastWork: 0, inventory: {}, buffs: {} };
+    }
+    return economy.users[userId];
+}
+
+const SHOP_ITEMS = {
+    potion: { name: 'Potion', cost: 100, desc: 'Gibt +25 XP' },
+    luckycoin: { name: 'Lucky Coin', cost: 300, desc: 'Gibt sofort +200 Münzen' },
+    mysterybox: { name: 'Mystery Box', cost: 1000, desc: 'Gibt zufällige Belohnung' }
+};
 
 // small sleep helper used by animated replies
 function sleep(ms) {
@@ -2623,6 +2703,149 @@ client.on('interactionCreate', async interaction => {
             console.error(error);
             await interaction.editReply('Es gab einen Fehler beim Erstellen des Profilbildes! ❌');
         }
+    }
+
+    // --- Economy & misc commands ---
+    if (commandName === 'reload') {
+        const isOwner = await isBotOwner(interaction);
+        if (!isOwner) return interaction.reply({ content: 'Nur der Bot-Owner darf das ausführen.', flags: MessageFlags.Ephemeral });
+        await interaction.deferReply({ ephemeral: true });
+        try {
+            await registerGlobalCommands();
+            return interaction.editReply({ content: '✅ Commands neu geladen.' });
+        } catch (e) {
+            console.error('/reload error', e);
+            return interaction.editReply({ content: '❌ Fehler beim Neuladen der Commands.' });
+        }
+    }
+
+    if (commandName === 'stats') {
+        const uptime = Date.now() - BOT_START_TIME;
+        const mem = process.memoryUsage();
+        const embed = {
+            title: 'Bot Performance',
+            fields: [
+                { name: 'Uptime', value: `${Math.floor(uptime / 1000)}s`, inline: true },
+                { name: 'Guilds', value: `${client.guilds.cache.size}`, inline: true },
+                { name: 'Memory (RSS)', value: `${(mem.rss / 1024 / 1024).toFixed(2)} MB`, inline: true },
+                { name: 'WS Ping', value: `${Math.round(client.ws.ping)} ms`, inline: true },
+                { name: 'Node PID', value: `${process.pid}`, inline: true }
+            ]
+        };
+        await interaction.reply({ embeds: [embed] });
+    }
+
+    if (commandName === 'rank') {
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const economy = await loadEconomy();
+        const user = ensureUserEntry(economy, targetUser.id);
+        const level = Math.floor(Math.sqrt(user.xp / 100));
+        const next = Math.pow(level + 1, 2) * 100;
+        await interaction.reply({ content: `${targetUser.tag} — Level ${level} • XP: ${user.xp}/${next} • Coins: ${user.coins}` });
+    }
+
+    if (commandName === 'leaderboard') {
+        const economy = await loadEconomy();
+        const by = (interaction.options.getString('by') || 'coins');
+        const users = Object.entries(economy.users || {}).map(([id, u]) => ({ id, coins: u.coins || 0, level: Math.floor(Math.sqrt((u.xp || 0) / 100)) }));
+        let sorted = [];
+        if (by === 'level') sorted = users.sort((a, b) => b.level - a.level).slice(0, 10);
+        else sorted = users.sort((a, b) => b.coins - a.coins).slice(0, 10);
+        if (sorted.length === 0) return interaction.reply({ content: 'Keine Spielerdaten vorhanden.' });
+        let text = `🏆 Top ${sorted.length} Spieler (nach ${by}):\n`;
+        sorted.forEach((u, i) => { text += `${i + 1}. <@${u.id}> — ${by === 'level' ? `Level ${u.level}` : `${u.coins} Coins`}\n`; });
+        return interaction.reply({ content: text });
+    }
+
+    if (commandName === 'daily') {
+        const economy = await loadEconomy();
+        const user = ensureUserEntry(economy, interaction.user.id);
+        const now = Date.now();
+        const ONE_DAY = 24 * 60 * 60 * 1000;
+        if (user.lastDaily && now - user.lastDaily < ONE_DAY) {
+            const remaining = Math.ceil((ONE_DAY - (now - user.lastDaily)) / 1000);
+            return interaction.reply({ content: `⏳ Du hast deinen Daily bereits abgeholt. Versuch es in ${remaining}s erneut.`, flags: MessageFlags.Ephemeral });
+        }
+        const reward = 50 + Math.floor(Math.random() * 251); // 50-300
+        user.coins = (user.coins || 0) + reward;
+        user.lastDaily = now;
+        await saveEconomy(economy);
+        return interaction.reply({ content: `✅ Du hast ${reward} Coins erhalten. Dein Kontostand: ${user.coins} Coins.` });
+    }
+
+    if (commandName === 'work') {
+        const economy = await loadEconomy();
+        const user = ensureUserEntry(economy, interaction.user.id);
+        const now = Date.now();
+        const HOUR = 60 * 60 * 1000;
+        if (user.lastWork && now - user.lastWork < HOUR) {
+            const remaining = Math.ceil((HOUR - (now - user.lastWork)) / 1000);
+            return interaction.reply({ content: `⏳ Du musst noch ${remaining}s warten bis du wieder arbeiten kannst.`, flags: MessageFlags.Ephemeral });
+        }
+        const reward = 10 + Math.floor(Math.random() * 141); // 10-150
+        const xp = 5 + Math.floor(Math.random() * 36); // 5-40
+        user.coins = (user.coins || 0) + reward;
+        user.xp = (user.xp || 0) + xp;
+        user.lastWork = now;
+        await saveEconomy(economy);
+        return interaction.reply({ content: `💼 Du hast gearbeitet und ${reward} Coins sowie ${xp} XP erhalten.` });
+    }
+
+    if (commandName === 'inventory') {
+        const economy = await loadEconomy();
+        const user = ensureUserEntry(economy, interaction.user.id);
+        const inv = user.inventory || {};
+        const lines = Object.keys(inv).length === 0 ? ['Dein Inventar ist leer.'] : Object.entries(inv).map(([k, v]) => `${k}: ${v}`);
+        return interaction.reply({ content: `📦 Dein Inventar:\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
+    }
+
+    if (commandName === 'shop') {
+        let sub = '';
+        try { sub = interaction.options.getSubcommand(false) || ''; } catch(_) { sub = ''; }
+        if (sub === 'list') {
+            const lines = Object.entries(SHOP_ITEMS).map(([key, it]) => `• ${it.name} (${key}) — ${it.cost} Coins — ${it.desc}`);
+            return interaction.reply({ content: `🛒 Shop Items:\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
+        }
+        if (sub === 'buy') {
+            const itemKey = interaction.options.getString('item');
+            const qty = Math.max(1, (interaction.options.getInteger('qty') || 1));
+            const item = SHOP_ITEMS[itemKey.toLowerCase()];
+            if (!item) return interaction.reply({ content: '❌ Dieses Item existiert nicht.', flags: MessageFlags.Ephemeral });
+            const economy = await loadEconomy();
+            const user = ensureUserEntry(economy, interaction.user.id);
+            const total = item.cost * qty;
+            if ((user.coins || 0) < total) return interaction.reply({ content: '❌ Du hast nicht genug Coins.', flags: MessageFlags.Ephemeral });
+            user.coins -= total;
+            user.inventory[itemKey] = (user.inventory[itemKey] || 0) + qty;
+            await saveEconomy(economy);
+            return interaction.reply({ content: `✅ Du hast ${qty}x ${item.name} gekauft. Verbleibende Coins: ${user.coins}`, flags: MessageFlags.Ephemeral });
+        }
+        return interaction.reply({ content: 'Nutze `/shop list` oder `/shop buy item:<name> [qty]`', flags: MessageFlags.Ephemeral });
+    }
+
+    if (commandName === 'use') {
+        const itemKey = (interaction.options.getString('item') || '').toLowerCase();
+        const economy = await loadEconomy();
+        const user = ensureUserEntry(economy, interaction.user.id);
+        const qty = user.inventory[itemKey] || 0;
+        if (qty <= 0) return interaction.reply({ content: '❌ Du besitzt dieses Item nicht.', flags: MessageFlags.Ephemeral });
+        user.inventory[itemKey] = Math.max(0, qty - 1);
+        let msg = 'Du hast das Item verwendet.';
+        if (itemKey === 'potion') {
+            user.xp = (user.xp || 0) + 25;
+            msg = '✨ Du hast eine Potion verwendet und +25 XP bekommen.';
+        } else if (itemKey === 'luckycoin') {
+            user.coins = (user.coins || 0) + 200;
+            msg = '🍀 Lucky Coin: +200 Coins erhalten.';
+        } else if (itemKey === 'mysterybox') {
+            const r = 100 + Math.floor(Math.random() * 901);
+            user.coins = (user.coins || 0) + r;
+            // 10% chance for an extra potion
+            if (Math.random() < 0.10) { user.inventory.potion = (user.inventory.potion || 0) + 1; msg += ' 🎁 Bonus: 1x Potion erhalten!'; }
+            msg = `📦 Mystery Box geöffnet: Du hast ${r} Coins gefunden. ${msg}`;
+        }
+        await saveEconomy(economy);
+        return interaction.reply({ content: msg });
     }
 
     // Krampus: send a Krampus-image (OpenAI if available, else Canvas fallback) and a scary line
