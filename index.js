@@ -698,17 +698,20 @@ client.once('ready', async () => {
         console.error('Failed to start scheduler:', e);
     }
     try {
-        // Send startup animation to guilds that configured an announce channel
+        // Send startup animation only to the Beastmeds community configured in _global.guildId
         const cfg = await loadConfig();
-        for (const [gid, gcfg] of Object.entries(cfg)) {
-            if (gid === '_global') continue;
-            try {
-                const announceId = gcfg && gcfg.announceChannelId;
-                if (!announceId) continue;
-                // fire and forget but throttle a bit to avoid rate limits
-                sendStartupAnimationToChannel(gid, announceId);
-                await new Promise(r => setTimeout(r, 900));
-            } catch (e) { /* ignore per-guild errors */ }
+        const targetGuild = cfg._global && cfg._global.guildId;
+        if (targetGuild) {
+            const gcfg = cfg[targetGuild] || {};
+            const announceId = gcfg.announceChannelId || (cfg._global && cfg._global.channelId);
+            if (announceId) {
+                // send but do not block startup on failures
+                sendStartupAnimationToChannel(targetGuild, announceId);
+            } else {
+                console.log('Startup animation: Beastmeds guild configured but no announce channel set.');
+            }
+        } else {
+            console.log('Startup animation: no Beastmeds guild configured (cfg._global.guildId missing).');
         }
     } catch (e) {
         console.error('startup animation dispatch error', e);
