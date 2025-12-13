@@ -1356,6 +1356,11 @@ const commands = [
     }
     ,
     {
+        name: 'whoami',
+        description: 'Zeigt, ob du als Bot-Owner erkannt wirst (Test)'
+    }
+    ,
+    {
         name: 'streamer',
         description: 'Streamer-Überwachung und -Management',
         options: [
@@ -2638,6 +2643,21 @@ client.on('interactionCreate', async interaction => {
         ];
         const pick = answers[Math.floor(Math.random() * answers.length)];
         await interaction.reply({ content: `🎱 Frage: ${q}\nAntwort: **${pick}**` });
+    }
+
+    if (commandName === 'whoami') {
+        try {
+            const owner = await isBotOwner(interaction);
+            const bypass = !!interaction.__isBotOwner;
+            const lines = [];
+            if (owner) lines.push('✅ Du wirst vom Bot als **Owner** erkannt.'); else lines.push('❌ Du bist **nicht** als Owner konfiguriert.');
+            lines.push('\nInterner Owner-Bypass aktiv: ' + (bypass ? 'Ja' : 'Nein'));
+            lines.push('\nDeine User-ID: ' + interaction.user.id);
+            return interaction.reply({ content: lines.join('\n'), flags: MessageFlags.Ephemeral });
+        } catch (e) {
+            console.error('whoami error', e);
+            return interaction.reply({ content: 'Fehler beim Ermitteln des Owner-Status.', flags: MessageFlags.Ephemeral });
+        }
     }
 
     // (handled by the dedicated /hack handler earlier)
