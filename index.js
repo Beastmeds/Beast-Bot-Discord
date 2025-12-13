@@ -2595,6 +2595,7 @@ async function registerCommandsForGuild(guildId) {
     }
     try {
         const deduped = dedupeCommands(commands);
+        try { console.log(`registerCommandsForGuild: ${guildId} -> commands:`, deduped.map(c => c && c.name)); } catch(_){}
         console.log(`Registriere Slash-Commands für Gilde ${guildId}... (Commands: ${deduped.length})`);
         // Discord has a 100-commands max per app per scope — truncate if necessary
         let toRegister = deduped;
@@ -2620,6 +2621,7 @@ async function registerGlobalCommands() {
     }
     try {
         const deduped = dedupeCommands(commands);
+        try { console.log('registerGlobalCommands: registering global commands ->', deduped.map(c => c && c.name)); } catch(_){}
         console.log(`Registriere globale Slash-Commands (kann einige Minuten dauern)... (Commands: ${deduped.length})`);
         let toRegister = deduped;
         if (deduped.length > 100) {
@@ -5623,6 +5625,7 @@ client.on('guildMemberAdd', async member => {
             await interaction.reply({
                 embeds: [infoEmbed]
             });
+            try { console.log('/info: displayed for', interaction.user && interaction.user.tag, 'in', interaction.guild && interaction.guild.id); } catch (_) {}
         } catch (e) {
             console.error('info handler error', e);
             await interaction.reply({
