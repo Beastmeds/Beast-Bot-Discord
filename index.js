@@ -513,6 +513,46 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
+        // /registerhere -> register commands for current guild (Admin/Owner only)
+        if (interaction.commandName === 'registerhere') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            let isAdmin = false;
+            try { isAdmin = !!(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.Administrator)); } catch(_) { isAdmin = false; }
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
+            if (!CLIENT_ID) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
+            await interaction.deferReply({ ephemeral: true });
+            try {
+                await registerCommandsForGuild(interaction.guild.id);
+                return interaction.editReply({ content: '✅ Slash-Commands für diese Gilde wurden registriert.' });
+            } catch (e) {
+                console.error('registerhere error', e && (e.stack || e));
+                return interaction.editReply({ content: '❌ Fehler beim Registrieren der Commands: ' + (e.message || String(e)) });
+            }
+        }
+
+        // /listguildcommands -> list registered guild-scoped commands for this guild (Admin/Owner only)
+        if (interaction.commandName === 'listguildcommands') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            let isAdmin = false;
+            try { isAdmin = !!(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.Administrator)); } catch(_) { isAdmin = false; }
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
+            if (!CLIENT_ID) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
+            await interaction.deferReply({ ephemeral: true });
+            try {
+                const res = await rest.get(Routes.applicationGuildCommands(CLIENT_ID, interaction.guild.id));
+                if (!res || !Array.isArray(res) || res.length === 0) return interaction.editReply({ content: 'Keine guild-scoped Commands registriert.' });
+                const lines = res.map(c => `• ${c.name} (${c.id})`).slice(0, 200);
+                return interaction.editReply({ content: `Registrierte Commands:\n${lines.join('\n')}` });
+            } catch (e) {
+                console.error('listguildcommands error', e && (e.stack || e));
+                return interaction.editReply({ content: 'Fehler beim Abfragen der registrierten Commands: ' + (e.message || String(e)) });
+            }
+        }
+
         // /queue
         if (interaction.commandName === 'queue') {
             if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
@@ -971,6 +1011,14 @@ const commands = [
     {
         name: 'clearguildcommands',
         description: 'Entfernt alle guild-scoped Slash-Commands für diese Gilde (Admin/Owner only)'
+    },
+    {
+        name: 'registerhere',
+        description: 'Registriert alle Slash-Commands für diese Gilde (Admin/Owner only)'
+    },
+    {
+        name: 'listguildcommands',
+        description: 'Listet alle guild-scoped Slash-Commands, die in dieser Gilde registriert sind (Admin/Owner only)'
     },
     
     {
