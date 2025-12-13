@@ -508,7 +508,7 @@ client.on('interactionCreate', async interaction => {
         }
 
         // /clearguildcommands -> clear guild-scoped commands for this guild (Admin/Owner only)
-        if (interaction.commandName === 'clearguildcommands') {
+        if (interaction.commandName === 'clearguildcommands' || interaction.commandName === 'clear') {
             if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
             // allow server admins or bot owner
             let isAdmin = false;
@@ -516,9 +516,11 @@ client.on('interactionCreate', async interaction => {
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
+            console.log('clearguildcommands invoked', { cmd: interaction.commandName, user: interaction.user?.tag, guild: interaction.guild?.id, isAdmin });
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             if (!getClientId()) return interaction.editReply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.' });
             try {
+                console.log('clearguildcommands: clearing guild commands', { appId: getClientId(), guild: interaction.guild.id });
                 await rest.put(Routes.applicationGuildCommands(getClientId(), interaction.guild.id), { body: [] });
                 return interaction.editReply({ content: '✅ Alle guild-scoped Slash-Commands für diese Gilde wurden entfernt.' });
             } catch (e) {
@@ -527,18 +529,23 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
-        // /registerhere -> register commands for current guild (Admin/Owner only)
-        if (interaction.commandName === 'registerhere') {
+        // /registerhere and /register -> register commands for current guild (Admin/Owner only)
+        if (interaction.commandName === 'registerhere' || interaction.commandName === 'register') {
             if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
             let isAdmin = false;
             try { isAdmin = !!(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.Administrator)); } catch(_) { isAdmin = false; }
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
-            if (!getClientId()) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
+            if (!getClientId()) {
+                console.warn('registerhere: missing client id', { user: interaction.user?.tag, guild: interaction.guild?.id });
+                return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
+            }
+            console.log('registerhere invoked', { cmd: interaction.commandName, user: interaction.user?.tag, guild: interaction.guild?.id, isAdmin });
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             try {
                 await registerCommandsForGuild(interaction.guild.id);
+                console.log('registerhere success', { user: interaction.user?.tag, guild: interaction.guild?.id });
                 return interaction.editReply({ content: '✅ Slash-Commands für diese Gilde wurden registriert.' });
             } catch (e) {
                 console.error('registerhere error', e && (e.stack || e));
@@ -791,7 +798,7 @@ client.once('ready', async () => {
 
     // Nach Login: Commands für alle derzeit gecachten Gilden registrieren
     try {
-        console.log('Registriere Slash-Commands...');
+        console.log('Registriere Slash-Commands...', { appId: getClientId(), localCommands: dedupeCommands(commands).length });
         // register global commands as well so commands are available across communities
         await registerGlobalCommands();
         // Register per-guild commands for immediate availability in each guild.
@@ -1065,8 +1072,16 @@ const commands = [
         description: 'Entfernt alle guild-scoped Slash-Commands für diese Gilde (Admin/Owner only)'
     },
     {
+        name: 'clear',
+        description: 'Alias für clearguildcommands: Entfernt guild-scoped Slash-Commands (Admin/Owner only)'
+    },
+    {
         name: 'registerhere',
         description: 'Registriert alle Slash-Commands für diese Gilde (Admin/Owner only)'
+    },
+    {
+        name: 'register',
+        description: 'Alias für registerhere: Registriert Slash-Commands (Admin/Owner only)'
     },
     {
         name: 'listguildcommands',
@@ -2550,10 +2565,12 @@ async function registerCommandsForGuild(guildId) {
             console.warn('Warnung: Mehr als 100 Commands, registriere nur die ersten 100 (andere werden übersprungen)');
             toRegister = deduped.slice(0, 100);
         }
+        console.log('registerCommandsForGuild: about to register', { appId, guildId, count: toRegister.length });
         await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: toRegister });
         console.log(`Slash-Commands für Gilde ${guildId} registriert.`);
     } catch (error) {
         console.error('Error registering commands for guild', guildId, error);
+        throw error;
     }
 }
 
@@ -2572,6 +2589,7 @@ async function registerGlobalCommands() {
             console.warn('Warnung: Mehr als 100 Commands. Nur die ersten 100 werden global registriert. Verwende /registerhere für Guild-Scoping.');
             toRegister = deduped.slice(0, 100);
         }
+        console.log('registerGlobalCommands: about to register global commands', { appId, count: toRegister.length });
         await rest.put(Routes.applicationCommands(appId), { body: toRegister });
         GLOBAL_COMMANDS_REGISTERED = true;
         console.log('Globale Slash-Commands registriert.');

@@ -32,11 +32,30 @@ GUILD_ID=zzz
 ```
 
 ## Prepare repository for hosting
+## Prepare repository for hosting
 - Make sure `.env` is listed in `.gitignore` (already added).
 - Remove any sensitive tokens from commits and history.
 
-## Deploying 24/7 on NodeChef (step-by-step)
-1. Create a Git repository and push your project to GitHub (or another Git provider):
+## Deploying 24/7 on Railway (step-by-step)
+Railway is a simple platform to host Node.js apps and integrates directly with GitHub, so the most common flow is:
+
+1. Create a GitHub repository and push your project.
+2. In Railway, create a new project and choose "Deploy from GitHub".
+3. Select your repository and branch.
+4. Configure environment variables in the Railway project settings (ENV):
+   - `DISCORD_TOKEN` = your bot token
+   - `CLIENT_ID` = your application id
+   - `GUILD_ID` = optional (for guild-scoped command registration; not necessary for global registration)
+   - `OWNER_ID` = optional (who should be treated as the bot owner)
+5. Railway will start the deployment using `startCommand` from `railway.json` (npm start). Verify the `startCommand` in `railway.json` is correct.
+6. Monitor the deployments and logs from the Railway dashboard, and test slash commands in Discord.
+
+Notes:
+- When you connect to GitHub, allow Railway to access the repository so it can deploy automatically.
+- If slash commands are not visible immediately, wait a few minutes or restart the bot.
+- For multi-instance deployments, move `guild-config.json` to a real DB rather than file-backed storage.
+## (Legacy) NodeChef instructions
+If you prefer NodeChef or another provider, use their UI to connect a Git repo and set environment variables accordingly.
 
 ```powershell
 git init
