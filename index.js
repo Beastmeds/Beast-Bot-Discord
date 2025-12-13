@@ -2634,9 +2634,9 @@ async function sendStartupDMsToOwners(cfg) {
                 const content = '```' + '\n' + lines.join('\n') + '\n' + '```';
                 let sent = false;
                 try {
-                    await user.send({ content });
+                    const sentMsg = await user.send({ content });
                     sent = true;
-                    try { console.log('Startup DM sent to owner', id); } catch (_) {}
+                    try { console.log('Startup DM sent to owner', id, 'messageId:', sentMsg && sentMsg.id); } catch (_) {}
                 } catch (e) {
                     console.warn('Failed sending startup DM to', id, e && (e.message || e));
                 }
@@ -2650,8 +2650,8 @@ async function sendStartupDMsToOwners(cfg) {
                             if (guild) {
                                 const ch = guild.channels.cache.get(announceId) || await guild.channels.fetch(announceId).catch(()=>null);
                                 if (ch && ch.isTextBased()) {
-                                    await ch.send({ content: `<@${id}> Ich konnte dir keine DM senden; du findest Beast Bot nun online.` });
-                                    try { console.log('Fallback mention sent for owner', id, 'in channel', announceId); } catch(_){}
+                                    const mentionMsg = await ch.send({ content: `<@${id}> Ich konnte dir keine DM senden; du findest Beast Bot nun online.` });
+                                    try { console.log('Fallback mention sent for owner', id, 'in channel', announceId, 'messageId:', mentionMsg && mentionMsg.id); } catch(_){ }
                                 }
                             }
                         }
