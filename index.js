@@ -46,6 +46,17 @@ client.on('error', (err) => {
 client.on('interactionCreate', async interaction => {
     try {
         if (!interaction.isChatInputCommand()) return;
+        // mark bot-owner and, if owner, monkey-patch permission checks so owner can bypass server role requirements
+        try {
+            const ownerFlag = await isBotOwner(interaction);
+            interaction.__isBotOwner = !!ownerFlag;
+            if (interaction.__isBotOwner && interaction.member && interaction.member.permissions && typeof interaction.member.permissions.has === 'function') {
+                const origHas = interaction.member.permissions.has.bind(interaction.member.permissions);
+                interaction.member.permissions.has = (perm) => {
+                    try { if (interaction.__isBotOwner) return true; return origHas(perm); } catch (e) { return false; }
+                };
+            }
+        } catch (e) { /* non-fatal */ }
         const cmd = interaction.commandName;
         const cfg = await loadConfig();
         const gcfg = (interaction.guild && cfg[interaction.guild.id]) ? cfg[interaction.guild.id] : {};
@@ -1376,6 +1387,22 @@ async function loadConfig() {
         if (e.code === 'ENOENT') return {};
         console.error('Failed to load config:', e);
         return {};
+    }
+}
+
+// Helper: determine if the interacting user is configured as bot owner
+async function isBotOwner(interaction) {
+    try {
+        const cfg = await loadConfig();
+        const owners = new Set();
+        if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+        if (cfg.ownerId) owners.add(cfg.ownerId);
+        if (Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+        if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+        return owners.has(interaction.user.id);
+    } catch (e) {
+        console.error('isBotOwner helper error', e);
+        return false;
     }
 }
 
