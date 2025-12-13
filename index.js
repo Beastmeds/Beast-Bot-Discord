@@ -13,7 +13,7 @@ import ytdl from 'ytdl-core';
 // Bot startup time tracker
 const BOT_START_TIME = Date.now();
 
-// Einfacher HTTP-Server für Replit / Uptime pings
+// Einfacher HTTP-Server für Uptime / Healthchecks
 const app = express();
 app.get('/', (req, res) => res.send('Beast Bot ist online'));
 app.get('/health', (req, res) => res.json({ status: 'ok', time: Date.now() }));
@@ -24,6 +24,7 @@ const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers
     ],
@@ -5472,6 +5473,19 @@ client.on('guildMemberAdd', async member => {
             } catch (e) {
                 console.warn('info: unexpected error while fetching command counts', e && e.message);
             }
+            // fallback: use client.application.commands.fetch() / interaction.guild.commands.fetch()
+            try {
+                if (!globalCmdCount && client.application && client.application.commands) {
+                    const apps = await client.application.commands.fetch();
+                    if (apps) globalCmdCount = apps.size || globalCmdCount;
+                }
+                if (!guildCmdCount && interaction.guild && interaction.guild.commands) {
+                    const gcmds = await interaction.guild.commands.fetch();
+                    if (gcmds) guildCmdCount = gcmds.size || guildCmdCount;
+                }
+            } catch (e) {
+                // best-effort fallback - not critical
+            }
 
             const infoEmbed = {
                 title: '🤖 Beast Bot - Informationen',
@@ -5515,13 +5529,12 @@ client.on('guildMemberAdd', async member => {
                     },
                     {
                         name: '🎵 Music',
-                        value: `\`${musicStatus}\` Now: ${musicNow} | Queue: ${musicQueue} | Vol: ${musicVolume}%`,
+                        value: `${musicStatus === 'Idle' ? 'Idle Now:' : (musicStatus === 'Playing' ? 'Now playing:' : 'Status:')} ${musicNow} | Queue: ${musicQueue} | Vol: ${musicVolume}%`,
                         inline: true
                     },
                     {
                         name: '⚙️ Registered Commands',
-                        value: `Global: \`${globalCmdCount}\`
-Guild: \`${guildCmdCount}\``,
+                        value: `Global: \`${globalCmdCount}\`\nGuild: \`${guildCmdCount}\`\nCode: \`${dedupeCommands(commands).length}\``,
                         inline: true
                     },
                     {
@@ -5540,6 +5553,9 @@ Guild: \`${guildCmdCount}\``,
                         inline: false
                     }
                 ],
+                image: {
+                    url: client.user.displayAvatarURL({ size: 1024, dynamic: true })
+                },
                 thumbnail: {
                     url: client.user.displayAvatarURL({ size: 512, dynamic: true })
                 },
