@@ -953,6 +953,10 @@ const commands = [
         description: 'Sag Hallo zum Bot!'
     },
     {
+        name: 'info',
+        description: 'Zeigt Informationen über den Bot 🤖'
+    },
+    {
         name: 'set-welcome',
         description: 'Setzt den Welcome-Channel für den Server',
         options: [
@@ -1596,16 +1600,7 @@ const commands = [
         name: 'ski',
         description: 'Eine lustige Ski-Animation! 🎿'
     },
-    {
-        name: 'info',
-        description: 'Zeigt Informationen über den Bot 🤖'
-    }
-    ,
-    {
-        name: 'whoami',
-        description: 'Zeigt, ob du als Bot-Owner erkannt wirst (Test)'
-    }
-    ,
+    
     {
         name: 'streamer',
         description: 'Streamer-Überwachung und -Management',
