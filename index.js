@@ -689,6 +689,8 @@ client.once('ready', async () => {
     // Nach Login: Commands für alle derzeit gecachten Gilden registrieren
     try {
         console.log('Registriere Slash-Commands für alle Gilden...');
+        // register global commands as well so commands are available across communities
+        await registerGlobalCommands();
         // Versuche alle Gilden zu fetchen (falls nicht im Cache)
         const fetched = await client.guilds.fetch();
         for (const [gid] of fetched) {
@@ -2193,6 +2195,21 @@ async function registerCommandsForGuild(guildId) {
     }
 }
 
+// Register application (global) commands so they are available in any guild where the bot is invited
+async function registerGlobalCommands() {
+    if (!CLIENT_ID) {
+        console.warn('CLIENT_ID nicht gesetzt - überspringe globale Command-Registrierung');
+        return;
+    }
+    try {
+        console.log('Registriere globale Slash-Commands (kann einige Minuten dauern)...');
+        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        console.log('Globale Slash-Commands registriert.');
+    } catch (error) {
+        console.error('Error registering global commands', error);
+    }
+}
+
 // ---- Krampus helpers: TTS generation and voice playback ----
 async function generateKrampusAudioBuffer(text) {
     // Try ElevenLabs first
@@ -2697,7 +2714,14 @@ client.on('interactionCreate', async interaction => {
     }
 
     if (commandName === 'say') {
-        if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
+        // allow server admins or bot owner
+        let isAdmin = false;
+        try { isAdmin = !!(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.Administrator)); } catch(_) { isAdmin = false; }
+        if (!isAdmin) {
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            if (!owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Admins dürfen das verwenden.', flags: MessageFlags.Ephemeral });
+        }
         const text = interaction.options.getString('message');
         await interaction.reply({ content: 'Nachricht gesendet.', flags: MessageFlags.Ephemeral });
         await interaction.channel.send({ content: text });
