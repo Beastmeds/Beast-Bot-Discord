@@ -72,6 +72,7 @@ git push -u origin main
    - `DISCORD_TOKEN` = your bot token
    - `CLIENT_ID` = your application id
    - `GUILD_ID` = optional (only used for dev/guild-scoped registration; you can remove in production)
+   Important: Do not commit secret keys to the repo. `guild-config.json` has been removed from version control; put sensitive keys in Railway environment variables instead.
 6. Ensure the start command is `npm start` (or `node index.js`). NodeChef will use `package.json` scripts.
 7. Deploy the app. NodeChef will run your process and keep it up (auto-restarts on crashes).
 
