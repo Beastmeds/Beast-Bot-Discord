@@ -853,6 +853,8 @@ client.once('ready', async () => {
         } else {
             console.log('Startup animation: no Beastmeds guild configured (cfg._global.guildId missing).');
         }
+        // Attempt to notify owners via DM (best-effort). This won't block startup.
+        try { sendStartupDMsToOwners(cfg).catch(()=>null); } catch (e) { console.warn('sendStartupDMsToOwners invocation error', e && e.message); }
     } catch (e) {
         console.error('startup animation dispatch error', e);
     }
@@ -2594,6 +2596,46 @@ async function sendStartupBannerToChannel(guildId, channelId) {
         try { console.log('Startup banner sent to', guildId, channelId); } catch (_) {}
     } catch (e) {
         console.warn('sendStartupBannerToChannel failed', e && (e.message || e));
+    }
+}
+
+// Send DM notifications to configured owners (if available)
+async function sendStartupDMsToOwners(cfg) {
+    try {
+        const owners = new Set();
+        if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID);
+        if (cfg && cfg.ownerId) owners.add(cfg.ownerId);
+        if (cfg && Array.isArray(cfg.owners)) cfg.owners.forEach(o => owners.add(o));
+        if (cfg && cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o => owners.add(o));
+        if (owners.size === 0) return;
+        for (const id of owners) {
+            try {
+                const user = await client.users.fetch(id).catch(() => null);
+                if (!user) {
+                    console.warn('sendStartupDMsToOwners: owner not found', id);
+                    continue;
+                }
+                const lines = [
+                    '🟢 Beast Bot ist online',
+                    '',
+                    'Dies ist eine Start-Benachrichtigung, dass der Bot nun verbunden ist.',
+                    'Er stellt Slash-Commands bereit und überwacht Aktivitäten.',
+                    '',
+                    'Wenn du diese Nachricht nicht sehen kannst (keine DMs von Servermitgliedern erlaubt), aktiviere DMs oder gib mir eine Rolle/DM-Freigabe.'
+                ];
+                const content = '```' + '\n' + lines.join('\n') + '\n' + '```';
+                try {
+                    await user.send({ content });
+                    try { console.log('Startup DM sent to owner', id); } catch (_) {}
+                } catch (e) {
+                    console.warn('Failed sending startup DM to', id, e && e.message);
+                }
+            } catch (e) {
+                console.warn('sendStartupDMsToOwners: unexpected for', id, e && e.message);
+            }
+        }
+    } catch (e) {
+        console.warn('sendStartupDMsToOwners error', e && e.message);
     }
 }
 
