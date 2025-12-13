@@ -752,6 +752,58 @@ client.once('ready', async () => {
     }
 });
 
+// When the bot joins a new guild, send a friendly welcome message
+client.on('guildCreate', async (guild) => {
+    try {
+        const cfg = await loadConfig();
+        const gcfg = cfg[guild.id] || {};
+
+        // Try configured channels first
+        let ch = null;
+        const preferred = gcfg.welcomeChannelId || gcfg.announceChannelId || (cfg._global && cfg._global.channelId);
+        if (preferred) {
+            ch = guild.channels.cache.get(preferred) || await guild.channels.fetch(preferred).catch(() => null);
+        }
+
+        // fallback: system channel
+        if (!ch && guild.systemChannel && guild.systemChannel.isTextBased && guild.systemChannel.isTextBased()) ch = guild.systemChannel;
+
+        // fallback: find first sensible text channel (named welcome/general/announcements) where bot can send messages
+        if (!ch) {
+            const textChannels = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).sort((a,b) => a.position - b.position);
+            const names = ['welcome','general','announcements','info','chat','📣','💬'];
+            for (const [id, c] of textChannels) {
+                const name = (c.name || '').toLowerCase();
+                if (names.some(n => name.includes(n))) {
+                    const botMember = guild.members.me || await guild.members.fetch(client.user.id).catch(() => null);
+                    const perms = c.permissionsFor ? c.permissionsFor(botMember) : null;
+                    if (perms && perms.has && perms.has(PermissionFlagsBits.SendMessages)) { ch = c; break; }
+                }
+            }
+            if (!ch) {
+                // final fallback: first text channel where bot can send
+                for (const [id, c] of textChannels) {
+                    const botMember = guild.members.me || await guild.members.fetch(client.user.id).catch(() => null);
+                    const perms = c.permissionsFor ? c.permissionsFor(botMember) : null;
+                    if (perms && perms.has && perms.has(PermissionFlagsBits.SendMessages)) { ch = c; break; }
+                }
+            }
+        }
+
+        if (!ch) return;
+
+        const welcome = `👋 Hallo! Ich bin **Beast Bot** und freue mich, euch in dieser Community zu begleiten.\n\nNutze /info, um alle Infos über mich zu sehen. Viel Spaß zusammen! 🎉`;
+        try {
+            await ch.send({ content: welcome });
+            console.log('Sent welcome message to guild', guild.id, ch.id);
+        } catch (e) {
+            console.warn('Failed to send welcome message to', guild.id, e && e.message);
+        }
+    } catch (e) {
+        console.error('guildCreate handler error', e && (e.stack || e));
+    }
+});
+
 // Early interaction guard: owner-only mode and disabled commands
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
