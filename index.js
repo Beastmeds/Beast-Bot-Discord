@@ -1676,19 +1676,26 @@ async function startNextInGuild(channel, guildId) {
             return;
         }
 
-        // get stream via play-dl; if that fails, fallback to ytdl-core
+        // get stream via play-dl; if that fails or returns no stream, fallback to ytdl-core for YouTube
         let streamInfo = null;
         try {
-            streamInfo = await play.stream(playUrl);
+            streamInfo = await play.stream(playUrl).catch(err => { throw err; });
+            if (!streamInfo || !streamInfo.stream) throw new Error('play-dl returned no stream');
             state.current.stream = streamInfo.stream;
         } catch (pdErr) {
-            console.warn('play-dl stream failed, attempting ytdl-core fallback', pdErr && pdErr.message);
+            console.warn('play-dl stream failed or returned no stream, attempting ytdl-core fallback', pdErr && pdErr.message);
             try {
-                const ystream = ytdl(playUrl, { filter: 'audioonly', quality: 'highestaudio', highWaterMark: 1 << 25 });
-                state.current.stream = ystream;
+                // only try ytdl for YouTube links (ytdl-core throws on non-youtube urls)
+                if (/youtube\.com|youtu\.be/i.test(playUrl)) {
+                    const ystream = ytdl(playUrl, { filter: 'audioonly', quality: 'highestaudio', highWaterMark: 1 << 25 });
+                    state.current.stream = ystream;
+                } else {
+                    throw pdErr;
+                }
             } catch (yErr) {
-                console.error('ytdl-core fallback failed', yErr && (yErr.stack || yErr));
-                throw pdErr; // throw original play-dl error up
+                console.error('ytdl-core fallback failed or not applicable', yErr && (yErr.stack || yErr));
+                // propagate original error for upstream handling
+                throw pdErr;
             }
         }
         const outStream = fsSync.createWriteStream(tmpPath);
