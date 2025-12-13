@@ -844,6 +844,8 @@ client.once('ready', async () => {
             const announceId = gcfg.announceChannelId || (cfg._global && cfg._global.channelId);
             if (announceId) {
                 // send but do not block startup on failures
+                // send a readable banner and the animated frame
+                sendStartupBannerToChannel(targetGuild, announceId).catch(() => null);
                 sendStartupAnimationToChannel(targetGuild, announceId);
             } else {
                 console.log('Startup animation: Beastmeds guild configured but no announce channel set.');
@@ -2570,6 +2572,28 @@ async function sendStartupAnimationToChannel(guildId, channelId) {
         }
     } catch (e) {
         console.error('startup animation error for', guildId, channelId, e);
+    }
+}
+
+// Send a one-time readable startup banner (ASCII box) to configured announce channel
+async function sendStartupBannerToChannel(guildId, channelId) {
+    try {
+        const guild = await client.guilds.fetch(guildId).catch(() => null);
+        if (!guild) return;
+        const ch = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+        if (!ch || !ch.isTextBased()) return;
+
+        const title = '🟢 Beast Bot ist online';
+        const bannerWidth = Math.max(30, title.length + 6);
+        const padSide = Math.floor((bannerWidth - title.length) / 2);
+        const top = '╔' + '═'.repeat(bannerWidth) + '╗';
+        const mid = '║' + ' '.repeat(padSide) + title + ' '.repeat(bannerWidth - title.length - padSide) + '║';
+        const bottom = '╚' + '═'.repeat(bannerWidth) + '╝';
+        const content = '```' + '\n' + top + '\n' + mid + '\n' + bottom + '\n' + '```' + '\n' + 'Beast Bot ist jetzt online — Viel Spaß in der Community!';
+        await ch.send({ content });
+        try { console.log('Startup banner sent to', guildId, channelId); } catch (_) {}
+    } catch (e) {
+        console.warn('sendStartupBannerToChannel failed', e && (e.message || e));
     }
 }
 
