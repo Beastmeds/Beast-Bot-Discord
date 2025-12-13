@@ -516,9 +516,9 @@ client.on('interactionCreate', async interaction => {
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-            if (!CLIENT_ID) return interaction.editReply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.' });
+            if (!getClientId()) return interaction.editReply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.' });
             try {
-                await rest.put(Routes.applicationGuildCommands(CLIENT_ID, interaction.guild.id), { body: [] });
+                await rest.put(Routes.applicationGuildCommands(getClientId(), interaction.guild.id), { body: [] });
                 return interaction.editReply({ content: '✅ Alle guild-scoped Slash-Commands für diese Gilde wurden entfernt.' });
             } catch (e) {
                 console.error('clearguildcommands error', e && (e.stack || e));
@@ -534,7 +534,7 @@ client.on('interactionCreate', async interaction => {
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
-            if (!CLIENT_ID) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
+            if (!getClientId()) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             try {
                 await registerCommandsForGuild(interaction.guild.id);
@@ -553,10 +553,10 @@ client.on('interactionCreate', async interaction => {
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
-            if (!CLIENT_ID) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
+            if (!getClientId()) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
             await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             try {
-                const res = await rest.get(Routes.applicationGuildCommands(CLIENT_ID, interaction.guild.id));
+                const res = await rest.get(Routes.applicationGuildCommands(getClientId(), interaction.guild.id));
                 if (!res || !Array.isArray(res) || res.length === 0) return interaction.editReply({ content: 'Keine guild-scoped Commands registriert.' });
                 const lines = res.map(c => `• ${c.name} (${c.id})`).slice(0, 200);
                 return safeEdit(interaction, `Registrierte Commands:\n${lines.join('\n')}`);
@@ -2514,15 +2514,42 @@ async function sendStartupAnimationToChannel(guildId, channelId) {
 // Extend scheduler to handle timed role removals stored in cfg._global.timedRoles
 // We'll patch the existing startScheduler logic above to also process timedRoles on every run.
 
+// Helper: get application id (CLIENT_ID env or client.user.id after ready)
+function getClientId() {
+    return CLIENT_ID || client.user?.id;
+}
+
+// Helper: dedupe commands by name (case-insensitive)
+function dedupeCommands(cmds) {
+    const seen = new Set();
+    const out = [];
+    for (const c of (cmds || [])) {
+        const n = (c && c.name && String(c.name).toLowerCase()) || '';
+        if (!n) continue;
+        if (seen.has(n)) continue;
+        seen.add(n);
+        out.push(c);
+    }
+    return out;
+}
+
 // Register commands helper: registers guild-scoped commands for a given guild
 async function registerCommandsForGuild(guildId) {
-    if (!CLIENT_ID) {
-        console.warn('CLIENT_ID nicht gesetzt - überspringe Command-Registrierung');
+    const appId = getClientId();
+    if (!appId) {
+        console.warn('Kein Client/Application-ID verfügbar - überspringe Command-Registrierung');
         return;
     }
     try {
-        console.log(`Registriere Slash-Commands für Gilde ${guildId}...`);
-        await rest.put(Routes.applicationGuildCommands(CLIENT_ID, guildId), { body: commands });
+        const deduped = dedupeCommands(commands);
+        console.log(`Registriere Slash-Commands für Gilde ${guildId}... (Commands: ${deduped.length})`);
+        // Discord has a 100-commands max per app per scope — truncate if necessary
+        let toRegister = deduped;
+        if (deduped.length > 100) {
+            console.warn('Warnung: Mehr als 100 Commands, registriere nur die ersten 100 (andere werden übersprungen)');
+            toRegister = deduped.slice(0, 100);
+        }
+        await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: toRegister });
         console.log(`Slash-Commands für Gilde ${guildId} registriert.`);
     } catch (error) {
         console.error('Error registering commands for guild', guildId, error);
@@ -2531,13 +2558,20 @@ async function registerCommandsForGuild(guildId) {
 
 // Register application (global) commands so they are available in any guild where the bot is invited
 async function registerGlobalCommands() {
-    if (!CLIENT_ID) {
-        console.warn('CLIENT_ID nicht gesetzt - überspringe globale Command-Registrierung');
+    const appId = getClientId();
+    if (!appId) {
+        console.warn('Kein Client/Application-ID verfügbar - überspringe globale Command-Registrierung');
         return;
     }
     try {
-        console.log('Registriere globale Slash-Commands (kann einige Minuten dauern)...');
-        await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        const deduped = dedupeCommands(commands);
+        console.log(`Registriere globale Slash-Commands (kann einige Minuten dauern)... (Commands: ${deduped.length})`);
+        let toRegister = deduped;
+        if (deduped.length > 100) {
+            console.warn('Warnung: Mehr als 100 Commands. Nur die ersten 100 werden global registriert. Verwende /registerhere für Guild-Scoping.');
+            toRegister = deduped.slice(0, 100);
+        }
+        await rest.put(Routes.applicationCommands(appId), { body: toRegister });
         GLOBAL_COMMANDS_REGISTERED = true;
         console.log('Globale Slash-Commands registriert.');
     } catch (error) {
@@ -2553,7 +2587,7 @@ async function clearAllGuildCommands() {
         const fetched = await client.guilds.fetch();
         for (const [gid] of fetched) {
             try {
-                await rest.put(Routes.applicationGuildCommands(CLIENT_ID, gid), { body: [] });
+                await rest.put(Routes.applicationGuildCommands(getClientId(), gid), { body: [] });
                 console.log('Cleared guild commands for', gid);
                 await new Promise(r => setTimeout(r, 300));
             } catch (e) {
