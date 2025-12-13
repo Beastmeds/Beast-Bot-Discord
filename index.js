@@ -465,6 +465,20 @@ client.on('interactionCreate', async interaction => {
             return interaction.reply({ content: ok ? '⏭️ Track übersprungen.' : 'Keine Songs in der Queue.', flags: MessageFlags.Ephemeral });
         }
 
+        // /invite -> return OAuth2 invite URL for the bot
+        if (interaction.commandName === 'invite') {
+            const clientId = CLIENT_ID || process.env.CLIENT_ID || client.user?.id;
+            if (!clientId) return interaction.reply({ content: 'Client ID is not configured on the bot.', flags: MessageFlags.Ephemeral });
+            // default to no special permissions (0), include applications.commands scope so slash commands are available
+            const perms = process.env.BOT_INVITE_PERMISSIONS || '0';
+            const url = `https://discord.com/oauth2/authorize?client_id=${clientId}&permissions=${perms}&scope=bot%20applications.commands`; 
+            try {
+                await interaction.reply({ content: `Invite link: ${url}`, flags: MessageFlags.Ephemeral });
+            } catch (e) {
+                try { await interaction.channel.send(`Invite link: ${url}`); } catch(_){}
+            }
+        }
+
         // /queue
         if (interaction.commandName === 'queue') {
             if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
@@ -867,6 +881,10 @@ const commands = [
                 required: false
             }
         ]
+    },
+    {
+        name: 'invite',
+        description: 'Gibt einen Einladungslink, um den Bot in eine Community einzuladen'
     },
     
     {
