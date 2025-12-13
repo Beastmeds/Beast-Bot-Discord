@@ -1620,12 +1620,49 @@ const CLIENT_ID = process.env.CLIENT_ID;
 const CONFIG_PATH = path.resolve('./guild-config.json');
 const ECONOMY_PATH = path.resolve('./data/economy.json');
 
+function _tryParseJsonString(s) {
+    try {
+        if (!s) return null;
+        // If it looks like base64, decode first
+        if (/^[A-Za-z0-9+/=\n\r]+$/.test(s) && s.trim().length % 4 === 0 && s.trim().length > 50) {
+            try { s = Buffer.from(s, 'base64').toString('utf8'); } catch (_) {}
+        }
+        return JSON.parse(s);
+    } catch (e) {
+        return null;
+    }
+}
+
 async function loadConfig() {
+    // Prefer direct environment-provided config — useful for Railway deploys where files are ignored
+    try {
+        const envRaw = process.env.GUILD_CONFIG_JSON || process.env.GUILD_CONFIG_BASE64 || '';
+        const parsed = _tryParseJsonString(envRaw);
+        if (parsed) {
+            // If no file on disk but env provided, persist for debug and consistency
+            try {
+                if (!fsSync.existsSync(CONFIG_PATH)) {
+                    await fs.writeFile(CONFIG_PATH, JSON.stringify(parsed, null, 2), 'utf8');
+                    console.log('Wrote guild-config.json from GUILD_CONFIG_JSON env var');
+                }
+            } catch (e) { console.warn('Could not persist env-provided config to disk', e && e.message); }
+            return parsed;
+        }
+    } catch (e) { /* non-fatal */ }
+    // Fallback to file-backed config
     try {
         const txt = await fs.readFile(CONFIG_PATH, 'utf8');
         return JSON.parse(txt || '{}');
     } catch (e) {
-        if (e.code === 'ENOENT') return {};
+        if (e.code === 'ENOENT') {
+            // If example exists, prefer to return {} but warn (do NOT auto-load example as production config)
+            try {
+                if (fsSync.existsSync(path.resolve('./guild-config.example.json'))) {
+                    console.warn('Warning: guild-config.json not found. Using empty config — guild-config.example.json is present but not used automatically. To load production config on Railway, set GUILD_CONFIG_JSON or upload a real guild-config.json file.');
+                }
+            } catch (_) {}
+            return {};
+        }
         console.error('Failed to load config:', e);
         return {};
     }
@@ -5433,7 +5470,7 @@ client.on('guildMemberAdd', async member => {
 
             const uptimeStr = `${days}d ${hours}h ${minutes}m ${seconds}s`;
             const guilds = client.guilds.cache.size;
-            const users = client.guilds.cache.reduce((acc, g) => acc + g.memberCount, 0);
+            const users = client.guilds.cache.reduce((acc, g) => acc + (typeof g.memberCount === 'number' ? g.memberCount : 0), 0);
             const memory = Math.round(process.memoryUsage().heapUsed / 1024 / 1024);
             const version = process.version;
 
@@ -5572,14 +5609,14 @@ client.on('guildMemberAdd', async member => {
                     }
                 ],
                 image: {
-                    url: client.user.displayAvatarURL({ size: 1024, dynamic: true })
+                    url: (client.user && typeof client.user.displayAvatarURL === 'function') ? client.user.displayAvatarURL({ size: 1024, dynamic: true }) : undefined
                 },
                 thumbnail: {
-                    url: client.user.displayAvatarURL({ size: 512, dynamic: true })
+                    url: (client.user && typeof client.user.displayAvatarURL === 'function') ? client.user.displayAvatarURL({ size: 512, dynamic: true }) : undefined
                 },
                 footer: {
                     text: `Beast Bot v1.0 | Powered by Discord.js`,
-                    icon_url: client.user.displayAvatarURL()
+                    icon_url: (client.user && typeof client.user.displayAvatarURL === 'function') ? client.user.displayAvatarURL() : undefined
                 }
             };
 
@@ -5758,6 +5795,13 @@ client.on('guildMemberAdd', async member => {
             console.log(`👥 Bot ist auf ${client.guilds.cache.size} Servern aktiv`);
             client.user.setActivity('Musik abspielen 🎵', { type: 'LISTENING' });
         } catch (e) { console.warn('clientReady handler error', e && e.message); }
+    });
+
+    // Preload configuration — ensures Railway-provided env config is persisted to disk if present
+    loadConfig().then(()=>{
+        console.log('✅ Config loaded');
+    }).catch(err=>{
+        console.warn('⚠️ Failed to preload config', err && (err.message || err));
     });
 
     client.login(process.env.DISCORD_TOKEN).catch(error => {

@@ -47,6 +47,8 @@ Railway is a simple platform to host Node.js apps and integrates directly with G
    - `CLIENT_ID` = your application id
    - `GUILD_ID` = optional (for guild-scoped command registration; not necessary for global registration)
    - `OWNER_ID` = optional (who should be treated as the bot owner)
+   - `GUILD_CONFIG_JSON` = optional — a JSON string representing the `guild-config.json` contents. If set, the bot will prefer this config over the file in the repo.
+   - `GUILD_CONFIG_BASE64` = optional — same as `GUILD_CONFIG_JSON`, but base64-encoded (useful to avoid newline issues in Railway UI). If both are set, `GUILD_CONFIG_JSON` is preferred.
 5. Railway will start the deployment using `startCommand` from `railway.json` (npm start). Verify the `startCommand` in `railway.json` is correct.
 6. Monitor the deployments and logs from the Railway dashboard, and test slash commands in Discord.
 
@@ -54,6 +56,17 @@ Notes:
 - When you connect to GitHub, allow Railway to access the repository so it can deploy automatically.
 - If slash commands are not visible immediately, wait a few minutes or restart the bot.
 - For multi-instance deployments, move `guild-config.json` to a real DB rather than file-backed storage.
+Notes on `guild-config.json` in Railway:
+- This repository ignores `guild-config.json` to avoid accidentally committing secrets. On Railway, you can provide your production `guild-config.json` via the `GUILD_CONFIG_JSON` (or `GUILD_CONFIG_BASE64`) environment variables. The bot will persist the env config to disk at startup so features that expect a file continue to work.
+
+If you prefer base64 (avoids newline issues), on Windows PowerShell you can generate it with:
+```
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes((Get-Content guild-config.json -Raw)))
+```
+On macOS/Linux, use:
+```
+cat guild-config.json | base64 -w0
+```
 ## (Legacy) NodeChef instructions
 If you prefer NodeChef or another provider, use their UI to connect a Git repo and set environment variables accordingly.
 

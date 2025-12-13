@@ -1,0 +1,99 @@
+{
+  "1432754371761803374": {
+    "welcomeChannelId": "1432754372953247938",
+    "supportChannelId": "1434897360642642033",
+    "ticketCounter": 2,
+    "tickets": {
+      "1": {
+        "threadId": "1446878206090280961",
+        "creatorId": "1062372020127531058",
+        "status": "closed",
+        "subject": "test"
+      },
+      "2": {
+        "threadId": "1446878289196089426",
+        "creatorId": "1062372020127531058",
+        "status": "closed",
+        "subject": "Bewerbung"
+      }
+    },
+    "announceChannelId": "1434910165500690463",
+    "twitchKey": "gUCYc20HUq+S6tZIHmZnZv1n2h++TYP9117sEi+aDtM=",
+    "youtubeKey": "AIzaSyCNR1rWSXH6U0g_yoKIaG7XcwX5YcEGMqU",
+    "openaiKey": "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",
+    "website": "https://beast-bot-website.vercel.app/",
+    "watches": [
+      {
+        "service": "twitch",
+        "username": "Bastighg",
+        "channelId": "1434909825833238651",
+        "createdBy": "1062372020127531058",
+        "createdAt": 1765035270049
+      },
+      {
+        "service": "instagram",
+        "username": "Teqnicz",
+        "channelId": "1434909825833238651",
+        "createdBy": "1062372020127531058",
+        "createdAt": 1765035293765
+      },
+      {
+        "service": "youtube",
+        "username": "Benx",
+        "channelId": "1434909825833238651",
+        "createdBy": "1062372020127531058",
+        "createdAt": 1765035844287
+      }
+    ],
+    "twitchClientId": "8d3c8ur73av6puvv2i7i3vffgqq1o5",
+    "twitchClientSecret": "a2id3z7ujsoiryv9b6lp24nenwqrrn",
+    "disabledCommands": [
+      "ping"
+    ],
+    "krampus": {
+      "lastLocation": {
+        "dist": 489,
+        "dir": "N",
+        "ts": 1765046490426
+      },
+      "ultra": true,
+      "enabled": true
+    },
+    "voiceChannelId": "1449030865505095812"
+  },
+  "_global": {
+    "guildId": "1432754371761803374",
+    "channelId": "1434897360642642033",
+    "team": [
+      "1431342753207549992"
+    ],
+    "disabledCommands": [
+      "team",
+      "team users",
+      "ping"
+    ],
+    "ownerOnly": false,
+    "ticketCounter": 1,
+    "tickets": {
+      "1": {
+        "threadId": "1446898061615042591",
+        "creatorId": "1062372020127531058",
+        "status": "open",
+        "subject": "3",
+        "sourceGuildId": "1432754371761803374"
+      }
+    },
+    "elevenlabsKey": "sk_d6a2a6342d90ad1ffc0b1b3d80abcfda25f68d0339e954ec"
+  },
+  "1362460122424545474": {
+    "announceChannelId": "1362462105202327913",
+    "krampus": {
+      "lastLocation": {
+        "dist": 57,
+        "dir": "SE",
+        "ts": 1765047155880
+      },
+      "enabled": true
+    }
+  }
+}
