@@ -693,7 +693,8 @@ client.once('ready', async () => {
         await registerGlobalCommands();
         // If global registration succeeded, skip per-guild registration to avoid duplicates
         if (GLOBAL_COMMANDS_REGISTERED) {
-            console.log('Globale Commands registriert — überspringe per-Guild-Registrierung, um Duplikate zu vermeiden.');
+            console.log('Globale Commands registriert — entferne vorhandene per-Guild-Registrierungen, um Duplikate zu vermeiden.');
+            await clearAllGuildCommands();
         } else {
             // Versuche alle Gilden zu fetchen (falls nicht im Cache)
             const fetched = await client.guilds.fetch();
@@ -2216,6 +2217,27 @@ async function registerGlobalCommands() {
         console.log('Globale Slash-Commands registriert.');
     } catch (error) {
         console.error('Error registering global commands', error);
+    }
+}
+
+// Clear any guild-scoped commands to avoid duplicates when global commands are used.
+async function clearAllGuildCommands() {
+    if (!CLIENT_ID) return;
+    try {
+        console.log('Entferne vorhandene Guild-Scoped Commands in allen Gilden (falls vorhanden)...');
+        const fetched = await client.guilds.fetch();
+        for (const [gid] of fetched) {
+            try {
+                await rest.put(Routes.applicationGuildCommands(CLIENT_ID, gid), { body: [] });
+                console.log('Cleared guild commands for', gid);
+                await new Promise(r => setTimeout(r, 300));
+            } catch (e) {
+                console.warn('Failed to clear guild commands for', gid, e && e.message);
+            }
+        }
+        console.log('Fertig: Guild-Scoped Commands wurden entfernt.');
+    } catch (e) {
+        console.error('clearAllGuildCommands error', e && e.stack);
     }
 }
 
