@@ -479,6 +479,20 @@ client.on('interactionCreate', async interaction => {
             }
         }
 
+        // /testwelcome -> trigger the welcome message in the current guild (Admin or Owner only)
+        if (interaction.commandName === 'testwelcome') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            // allow server admins or bot owner
+            let isAdmin = false;
+            try { isAdmin = !!(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.Administrator)); } catch(_) { isAdmin = false; }
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Test verwenden.', flags: MessageFlags.Ephemeral });
+            await interaction.deferReply({ ephemeral: true });
+            const ok = await sendWelcomeMessageForGuild(interaction.guild).catch(e => false);
+            return interaction.editReply({ content: ok ? '✅ Testnachricht gesendet.' : '❌ Konnte keine passende Textnachricht senden (fehlende Berechtigungen?).' });
+        }
+
         // /queue
         if (interaction.commandName === 'queue') {
             if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
@@ -752,23 +766,16 @@ client.once('ready', async () => {
     }
 });
 
-// When the bot joins a new guild, send a friendly welcome message
-client.on('guildCreate', async (guild) => {
+// Helper: send the standard welcome message into a guild (tries configured channels, systemChannel, then best text channel)
+async function sendWelcomeMessageForGuild(guild) {
+    if (!guild) return false;
     try {
         const cfg = await loadConfig();
         const gcfg = cfg[guild.id] || {};
-
-        // Try configured channels first
         let ch = null;
         const preferred = gcfg.welcomeChannelId || gcfg.announceChannelId || (cfg._global && cfg._global.channelId);
-        if (preferred) {
-            ch = guild.channels.cache.get(preferred) || await guild.channels.fetch(preferred).catch(() => null);
-        }
-
-        // fallback: system channel
+        if (preferred) ch = guild.channels.cache.get(preferred) || await guild.channels.fetch(preferred).catch(() => null);
         if (!ch && guild.systemChannel && guild.systemChannel.isTextBased && guild.systemChannel.isTextBased()) ch = guild.systemChannel;
-
-        // fallback: find first sensible text channel (named welcome/general/announcements) where bot can send messages
         if (!ch) {
             const textChannels = guild.channels.cache.filter(c => c.type === ChannelType.GuildText).sort((a,b) => a.position - b.position);
             const names = ['welcome','general','announcements','info','chat','📣','💬'];
@@ -781,7 +788,6 @@ client.on('guildCreate', async (guild) => {
                 }
             }
             if (!ch) {
-                // final fallback: first text channel where bot can send
                 for (const [id, c] of textChannels) {
                     const botMember = guild.members.me || await guild.members.fetch(client.user.id).catch(() => null);
                     const perms = c.permissionsFor ? c.permissionsFor(botMember) : null;
@@ -789,19 +795,19 @@ client.on('guildCreate', async (guild) => {
                 }
             }
         }
-
-        if (!ch) return;
-
+        if (!ch) return false;
         const welcome = `👋 Hallo! Ich bin **Beast Bot** und freue mich, euch in dieser Community zu begleiten.\n\nNutze /info, um alle Infos über mich zu sehen. Viel Spaß zusammen! 🎉`;
-        try {
-            await ch.send({ content: welcome });
-            console.log('Sent welcome message to guild', guild.id, ch.id);
-        } catch (e) {
-            console.warn('Failed to send welcome message to', guild.id, e && e.message);
-        }
+        await ch.send({ content: welcome });
+        console.log('Sent welcome message to guild', guild.id, ch.id);
+        return true;
     } catch (e) {
-        console.error('guildCreate handler error', e && (e.stack || e));
+        console.error('sendWelcomeMessageForGuild error', e && (e.stack || e));
+        return false;
     }
+}
+
+client.on('guildCreate', async (guild) => {
+    await sendWelcomeMessageForGuild(guild).catch(e => console.warn('guildCreate welcome failed', e && e.message));
 });
 
 // Early interaction guard: owner-only mode and disabled commands
@@ -937,6 +943,10 @@ const commands = [
     {
         name: 'invite',
         description: 'Gibt einen Einladungslink, um den Bot in eine Community einzuladen'
+    },
+    {
+        name: 'testwelcome',
+        description: 'Test: sendet die Willkommensnachricht in diesen Server (Admin/Owner only)'
     },
     
     {
