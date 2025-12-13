@@ -688,18 +688,23 @@ client.once('ready', async () => {
 
     // Nach Login: Commands für alle derzeit gecachten Gilden registrieren
     try {
-        console.log('Registriere Slash-Commands für alle Gilden...');
+        console.log('Registriere Slash-Commands...');
         // register global commands as well so commands are available across communities
         await registerGlobalCommands();
-        // Versuche alle Gilden zu fetchen (falls nicht im Cache)
-        const fetched = await client.guilds.fetch();
-        for (const [gid] of fetched) {
-            try {
-                await registerCommandsForGuild(gid);
-                // kurze Pause um Rate-Limits zu schonen
-                await new Promise(r => setTimeout(r, 750));
-            } catch (e) {
-                console.error('Fehler beim Registrieren für Gilde', gid, e);
+        // If global registration succeeded, skip per-guild registration to avoid duplicates
+        if (GLOBAL_COMMANDS_REGISTERED) {
+            console.log('Globale Commands registriert — überspringe per-Guild-Registrierung, um Duplikate zu vermeiden.');
+        } else {
+            // Versuche alle Gilden zu fetchen (falls nicht im Cache)
+            const fetched = await client.guilds.fetch();
+            for (const [gid] of fetched) {
+                try {
+                    await registerCommandsForGuild(gid);
+                    // kurze Pause um Rate-Limits zu schonen
+                    await new Promise(r => setTimeout(r, 750));
+                } catch (e) {
+                    console.error('Fehler beim Registrieren für Gilde', gid, e);
+                }
             }
         }
     } catch (e) {
@@ -1383,6 +1388,9 @@ const commands = [
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+
+// Flag: set after successful global registration to avoid duplicate guild regs
+let GLOBAL_COMMANDS_REGISTERED = false;
 
 // Get IDs from environment variables
 const GUILD_ID = process.env.GUILD_ID;
@@ -2204,6 +2212,7 @@ async function registerGlobalCommands() {
     try {
         console.log('Registriere globale Slash-Commands (kann einige Minuten dauern)...');
         await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands });
+        GLOBAL_COMMANDS_REGISTERED = true;
         console.log('Globale Slash-Commands registriert.');
     } catch (error) {
         console.error('Error registering global commands', error);
