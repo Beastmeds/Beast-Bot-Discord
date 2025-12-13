@@ -813,6 +813,20 @@ client.once('ready', async () => {
                 console.error('Fehler beim Registrieren für Gilde', gid, e);
             }
         }
+        // Confirm which global and guild commands are registered
+        try {
+            const appId = getClientId();
+            if (appId) {
+                const gcmds = await rest.get(Routes.applicationCommands(appId));
+                try { console.log('Registered global commands:', (Array.isArray(gcmds) ? gcmds.map(c => c.name) : [])); } catch(_){}
+                if (GUILD_ID) {
+                    try {
+                        const guildCmds = await rest.get(Routes.applicationGuildCommands(appId, GUILD_ID));
+                        try { console.log('Registered guild commands for GUILD_ID:', GUILD_ID, (Array.isArray(guildCmds) ? guildCmds.map(c => c.name) : [])); } catch(_){}
+                    } catch (e) { /* ignore */ }
+                }
+            }
+        } catch (e) { console.warn('post-register: failed to list commands', e && e.message); }
     } catch (e) {
         console.error('Fehler beim initialen Registrieren der Commands:', e);
     }
