@@ -493,6 +493,26 @@ client.on('interactionCreate', async interaction => {
             return interaction.editReply({ content: ok ? '✅ Testnachricht gesendet.' : '❌ Konnte keine passende Textnachricht senden (fehlende Berechtigungen?).' });
         }
 
+        // /clearguildcommands -> clear guild-scoped commands for this guild (Admin/Owner only)
+        if (interaction.commandName === 'clearguildcommands') {
+            if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
+            // allow server admins or bot owner
+            let isAdmin = false;
+            try { isAdmin = !!(interaction.member && interaction.member.permissions && interaction.member.permissions.has(PermissionFlagsBits.Administrator)); } catch(_) { isAdmin = false; }
+            const cfg = await loadConfig();
+            const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
+            if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
+            await interaction.deferReply({ ephemeral: true });
+            if (!CLIENT_ID) return interaction.editReply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.' });
+            try {
+                await rest.put(Routes.applicationGuildCommands(CLIENT_ID, interaction.guild.id), { body: [] });
+                return interaction.editReply({ content: '✅ Alle guild-scoped Slash-Commands für diese Gilde wurden entfernt.' });
+            } catch (e) {
+                console.error('clearguildcommands error', e && (e.stack || e));
+                return interaction.editReply({ content: '❌ Konnte die Guild-Commands nicht löschen: ' + (e.message || String(e)) });
+            }
+        }
+
         // /queue
         if (interaction.commandName === 'queue') {
             if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
@@ -947,6 +967,10 @@ const commands = [
     {
         name: 'testwelcome',
         description: 'Test: sendet die Willkommensnachricht in diesen Server (Admin/Owner only)'
+    },
+    {
+        name: 'clearguildcommands',
+        description: 'Entfernt alle guild-scoped Slash-Commands für diese Gilde (Admin/Owner only)'
     },
     
     {
