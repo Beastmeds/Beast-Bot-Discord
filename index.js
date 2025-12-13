@@ -1097,6 +1097,16 @@ const commands = [
         ]
     },
     {
+        name: 'rolle',
+        description: 'Gebe oder entferne eine Rolle (Deutsch alias)',
+        options: [
+            { name: 'aktion', description: 'Aktion (add/remove)', type: 3, required: true, choices: [ { name: 'hinzufügen', value: 'add' }, { name: 'entfernen', value: 'remove' } ] },
+            { name: 'benutzer', description: 'Ziel-User', type: 6, required: true },
+            { name: 'rolle', description: 'Rolle', type: 8, required: true },
+            { name: 'dauer', description: 'Dauer (z.B. 10m, 2h, 1d) — optional', type: 3, required: false }
+        ]
+    },
+    {
         name: 'serverstats',
         description: 'Zeigt Statistiken zum Server'
     },
@@ -2648,67 +2658,73 @@ client.on('interactionCreate', async interaction => {
     }
 
     // /role add|remove [user] [role] [duration]
-    if (commandName === 'role') {
-        const action = interaction.options.getString('action');
-        const targetUser = interaction.options.getUser('user');
-        const roleObj = interaction.options.getRole('role');
-        const durationStr = interaction.options.getString('duration');
+    if (commandName === 'role' || commandName === 'rolle') {
+        const isGerman = commandName === 'rolle';
+        // support both english and german option names
+        const action = isGerman ? interaction.options.getString('aktion') : interaction.options.getString('action');
+        const targetUser = isGerman ? interaction.options.getUser('benutzer') : interaction.options.getUser('user');
+        const roleObj = isGerman ? interaction.options.getRole('rolle') : interaction.options.getRole('role');
+        const durationStr = isGerman ? interaction.options.getString('dauer') : interaction.options.getString('duration');
+
+        const permErr = isGerman ? 'Du brauchst die Berechtigung "Rollen verwalten" oder musst Bot-Owner sein.' : 'You need the Manage Roles permission or be the bot owner.';
+        const missingErr = isGerman ? 'Bitte gib einen Benutzer und eine Rolle an.' : 'Please specify a user and a role.';
+        const serverOnly = isGerman ? 'Dieser Befehl muss in einem Server verwendet werden.' : 'This command must be used in a server.';
+        const notFound = isGerman ? 'Ziel-Benutzer nicht auf diesem Server gefunden.' : 'Target user not found on this server.';
+        const invalidDur = isGerman ? 'Ungültige Dauer. Verwende z.B. `10m`, `2h` oder `1d`.' : 'Invalid duration. Use e.g. `10m`, `2h` or `1d`.';
+        const addedMsg = (rname, usertag, ts) => isGerman ? `✅ Rolle **${rname}** wurde ${usertag} gegeben${ts ? ' — wird entfernt am ' + new Date(ts).toLocaleString() : '.'}` : `✅ Role **${rname}** given to ${usertag}${ts ? ' — will be removed at ' + new Date(ts).toLocaleString() : '.'}`;
+        const removedMsg = (rname, usertag) => isGerman ? `✅ Rolle **${rname}** von ${usertag} entfernt.` : `✅ Role **${rname}** removed from ${usertag}.`;
 
         if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
             // allow bot owner as well
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             const isOwner = owners.has(interaction.user.id);
-            if (!isOwner) return interaction.reply({ content: 'Du brauchst die Berechtigung "Rollen verwalten" oder musst Bot-Owner sein.', flags: MessageFlags.Ephemeral });
+            if (!isOwner) return interaction.reply({ content: permErr, flags: MessageFlags.Ephemeral });
         }
 
-        if (!targetUser || !roleObj) return interaction.reply({ content: 'Bitte gib einen User und eine Rolle an.', flags: MessageFlags.Ephemeral });
+        if (!targetUser || !roleObj) return interaction.reply({ content: missingErr, flags: MessageFlags.Ephemeral });
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         try {
             const guild = interaction.guild;
-            if (!guild) return interaction.editReply('Dieser Befehl muss in einem Server verwendet werden.');
+            if (!guild) return interaction.editReply(serverOnly);
             const member = await guild.members.fetch(targetUser.id).catch(() => null);
-            if (!member) return interaction.editReply('Ziel-User nicht auf diesem Server gefunden.');
+            if (!member) return interaction.editReply(notFound);
 
             if (action === 'add') {
                 await member.roles.add(roleObj.id).catch(e => { throw e; });
 
-                // schedule removal if duration provided
                 if (durationStr) {
                     const ts = parseTimeString(durationStr);
-                    if (!ts) {
-                        return interaction.editReply('Ungültige Dauer. Verwende z.B. `10m`, `2h` oder `1d`.');
-                    }
+                    if (!ts) return interaction.editReply(invalidDur);
                     const cfg = await loadConfig();
                     cfg._global = cfg._global || {};
                     cfg._global.timedRoles = cfg._global.timedRoles || [];
                     cfg._global.timedRoles.push({ guildId: guild.id, userId: targetUser.id, roleId: roleObj.id, expiresAt: ts, createdBy: interaction.user.id });
                     await saveConfig(cfg);
-                    return interaction.editReply(`✅ Rolle **${roleObj.name}** wurde ${targetUser.tag} gegeben — wird entfernt am ${new Date(ts).toLocaleString()}.`);
+                    return interaction.editReply(addedMsg(roleObj.name, targetUser.tag, ts));
                 }
 
-                return interaction.editReply(`✅ Rolle **${roleObj.name}** wurde ${targetUser.tag} gegeben.`);
+                return interaction.editReply(addedMsg(roleObj.name, targetUser.tag, null));
             }
 
             if (action === 'remove') {
                 await member.roles.remove(roleObj.id).catch(e => { throw e; });
-                // also remove any pending timedRoles entries for this tuple
                 try {
                     const cfg = await loadConfig();
                     if (cfg._global && Array.isArray(cfg._global.timedRoles)) {
                         cfg._global.timedRoles = cfg._global.timedRoles.filter(t => !(t.guildId === guild.id && t.userId === targetUser.id && t.roleId === roleObj.id));
                         await saveConfig(cfg);
                     }
-                } catch (e) { /* ignore save errors */ }
-                return interaction.editReply(`✅ Rolle **${roleObj.name}** von ${targetUser.tag} entfernt.`);
+                } catch (e) { }
+                return interaction.editReply(removedMsg(roleObj.name, targetUser.tag));
             }
 
-            return interaction.editReply('Unbekannte Aktion. Verwende `add` oder `remove`.');
+            return interaction.editReply(isGerman ? 'Unbekannte Aktion. Verwende `add` oder `remove`.' : 'Unknown action. Use `add` or `remove`.');
         } catch (e) {
-            console.error('/role handler error', e && (e.stack || e));
-            try { return interaction.editReply('Fehler beim Ausführen des Befehls: ' + (e.message || String(e))); } catch(_){}
+            console.error('/role/rolle handler error', e && (e.stack || e));
+            try { return interaction.editReply((isGerman ? 'Fehler beim Ausführen des Befehls: ' : 'Error executing command: ') + (e.message || String(e))); } catch(_){}
         }
     }
 
