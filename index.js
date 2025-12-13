@@ -9,6 +9,7 @@ import fsSync from 'fs';
 import path from 'path';
 import express from 'express';
 import play from 'play-dl';
+import ytdl from 'ytdl-core';
 // Bot startup time tracker
 const BOT_START_TIME = Date.now();
 
@@ -1595,9 +1596,21 @@ async function startNextInGuild(channel, guildId) {
             return;
         }
 
-        // get stream via play-dl
-        const streamInfo = await play.stream(playUrl).catch(err => { throw err; });
-        state.current.stream = streamInfo.stream;
+        // get stream via play-dl; if that fails, fallback to ytdl-core
+        let streamInfo = null;
+        try {
+            streamInfo = await play.stream(playUrl);
+            state.current.stream = streamInfo.stream;
+        } catch (pdErr) {
+            console.warn('play-dl stream failed, attempting ytdl-core fallback', pdErr && pdErr.message);
+            try {
+                const ystream = ytdl(playUrl, { filter: 'audioonly', quality: 'highestaudio', highWaterMark: 1 << 25 });
+                state.current.stream = ystream;
+            } catch (yErr) {
+                console.error('ytdl-core fallback failed', yErr && (yErr.stack || yErr));
+                throw pdErr; // throw original play-dl error up
+            }
+        }
         const outStream = fsSync.createWriteStream(tmpPath);
         state.current.writeStream = outStream;
 
