@@ -2688,6 +2688,26 @@ function dedupeCommands(cmds) {
     return out;
 }
 
+// Ensure a few core commands are always at the front of the registration list so
+// essential commands like /info are not dropped when truncating to 100.
+const CORE_COMMAND_NAMES = new Set(['info', 'hallo', 'ping', 'setup', 'invite', 'stats', 'reload']);
+
+function prioritizeCoreCommands(cmds) {
+    try {
+        const core = [];
+        const rest = [];
+        for (const c of (cmds || [])) {
+            if (!c || !c.name) continue;
+            if (CORE_COMMAND_NAMES.has(String(c.name).toLowerCase())) core.push(c);
+            else rest.push(c);
+        }
+        // Keep core deduped order (as they appear) followed by the rest
+        return core.concat(rest);
+    } catch (e) {
+        return cmds;
+    }
+}
+
 // Register commands helper: registers guild-scoped commands for a given guild
 async function registerCommandsForGuild(guildId) {
     const appId = getClientId();
@@ -2700,13 +2720,17 @@ async function registerCommandsForGuild(guildId) {
         try { console.log(`registerCommandsForGuild: ${guildId} -> commands:`, deduped.map(c => c && c.name)); } catch(_){}
         console.log(`Registriere Slash-Commands für Gilde ${guildId}... (Commands: ${deduped.length})`);
         // Discord has a 100-commands max per app per scope — truncate if necessary
-        let toRegister = deduped;
+        // Ensure core commands are prioritized within the list so they don't get truncated
+        let toRegister = prioritizeCoreCommands(deduped);
         if (deduped.length > 100) {
             console.warn('Warnung: Mehr als 100 Commands, registriere nur die ersten 100 (andere werden übersprungen)');
-            toRegister = deduped.slice(0, 100);
+            const truncated = toRegister.slice(100);
+            toRegister = toRegister.slice(0, 100);
+            try { console.log('Truncated commands for guild', guildId, '->', truncated.map(c => c && c.name)); } catch(_){}
         }
         console.log('registerCommandsForGuild: about to register', { appId, guildId, count: toRegister.length });
         await rest.put(Routes.applicationGuildCommands(appId, guildId), { body: toRegister });
+        try { console.log('registerCommandsForGuild: finished registering', toRegister.length, 'commands for', guildId); } catch(_){}
         console.log(`Slash-Commands für Gilde ${guildId} registriert.`);
     } catch (error) {
         console.error('Error registering commands for guild', guildId, error);
@@ -2725,13 +2749,17 @@ async function registerGlobalCommands() {
         const deduped = dedupeCommands(commands);
         try { console.log('registerGlobalCommands: registering global commands ->', deduped.map(c => c && c.name)); } catch(_){}
         console.log(`Registriere globale Slash-Commands (kann einige Minuten dauern)... (Commands: ${deduped.length})`);
-        let toRegister = deduped;
+        // Ensure core commands are prioritized within the list so they don't get truncated
+        let toRegister = prioritizeCoreCommands(deduped);
         if (deduped.length > 100) {
             console.warn('Warnung: Mehr als 100 Commands. Nur die ersten 100 werden global registriert. Verwende /registerhere für Guild-Scoping.');
-            toRegister = deduped.slice(0, 100);
+            const truncated = toRegister.slice(100);
+            toRegister = toRegister.slice(0, 100);
+            try { console.log('Truncated global commands ->', truncated.map(c => c && c.name)); } catch(_){}
         }
         console.log('registerGlobalCommands: about to register global commands', { appId, count: toRegister.length });
         await rest.put(Routes.applicationCommands(appId), { body: toRegister });
+        try { console.log('registerGlobalCommands: finished registering', toRegister.length, 'global commands'); } catch(_){}
         GLOBAL_COMMANDS_REGISTERED = true;
         console.log('Globale Slash-Commands registriert.');
     } catch (error) {
