@@ -2064,19 +2064,26 @@ function buildStartupFrames() {
 
     // Create progressive frames that 'draw' the logo line by line
     const frames = [];
-    for (let i = 0; i <= logo.length; i++) {
+    // pad lines to fixed width so Discord preserves monospace alignment
+    const maxLen = Math.max(...logo.map(l => l.length));
+    const padded = logo.map(l => l.padEnd(maxLen, ' '));
+
+    for (let i = 0; i <= padded.length; i++) {
         const lines = [];
-        for (let j = 0; j < i; j++) lines.push(logo[j]);
+        for (let j = 0; j < i; j++) lines.push(padded[j]);
         // animate a progress bar under the drawn part
         const pct = Math.round((i / logo.length) * 100);
         const barFilled = Math.round((pct / 100) * 24);
         const bar = '█'.repeat(barFilled) + '░'.repeat(24 - barFilled);
-        lines.push('`' + bar + ' ' + pct + '%`');
+        lines.push(bar + ' ' + String(pct).padStart(3, ' ') + '%');
         frames.push(lines.join('\n'));
     }
 
     // final full logo + footer frame
-    frames.push(logo.join('\n') + '\n\n' + footer);
+    // pad footer to center-ish width
+    const finalLogo = padded.join('\n');
+    const padFooter = footer.padStart(Math.floor((maxLen + footer.length) / 2), ' ');
+    frames.push(finalLogo + '\n\n' + padFooter);
     return frames;
 }
 
@@ -2088,12 +2095,13 @@ async function sendStartupAnimationToChannel(guildId, channelId) {
         const ch = guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
         if (!ch || !ch.isTextBased()) return;
 
-        // send initial frame then edit through frames
-        const m = await ch.send({ content: frames[0] }).catch(() => null);
+        // send initial frame then edit through frames; wrap each frame in a code block
+        const content0 = '```' + frames[0] + '```';
+        const m = await ch.send({ content: content0 }).catch(() => null);
         if (!m) return;
         for (let i = 1; i < frames.length; i++) {
             await new Promise(r => setTimeout(r, 650));
-            try { await m.edit({ content: frames[i] }); } catch (e) { break; }
+            try { await m.edit({ content: '```' + frames[i] + '```' }); } catch (e) { break; }
         }
     } catch (e) {
         console.error('startup animation error for', guildId, channelId, e);
