@@ -5448,7 +5448,30 @@ client.on('guildMemberAdd', async member => {
             } catch (e) {
                 console.warn('info: failed to load streamer stats', e && e.message);
             }
-            // (music variables declared earlier)
+            // fetch registered commands count (global + guild) to include in info
+            let globalCmdCount = 0;
+            let guildCmdCount = 0;
+            try {
+                const appId = getClientId();
+                if (appId) {
+                    try {
+                        const globalCmds = await rest.get(Routes.applicationCommands(appId));
+                        if (Array.isArray(globalCmds)) globalCmdCount = globalCmds.length;
+                    } catch (e) {
+                        console.warn('info: failed to fetch global commands:', e && e.message);
+                    }
+                    if (interaction.guild && interaction.guild.id) {
+                        try {
+                            const guildCmds = await rest.get(Routes.applicationGuildCommands(appId, interaction.guild.id));
+                            if (Array.isArray(guildCmds)) guildCmdCount = guildCmds.length;
+                        } catch (e) {
+                            console.warn('info: failed to fetch guild commands:', e && e.message);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('info: unexpected error while fetching command counts', e && e.message);
+            }
 
             const infoEmbed = {
                 title: '🤖 Beast Bot - Informationen',
@@ -5493,6 +5516,12 @@ client.on('guildMemberAdd', async member => {
                     {
                         name: '🎵 Music',
                         value: `\`${musicStatus}\` Now: ${musicNow} | Queue: ${musicQueue} | Vol: ${musicVolume}%`,
+                        inline: true
+                    },
+                    {
+                        name: '⚙️ Registered Commands',
+                        value: `Global: \`${globalCmdCount}\`
+Guild: \`${guildCmdCount}\``,
                         inline: true
                     },
                     {
