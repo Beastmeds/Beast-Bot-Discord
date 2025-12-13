@@ -45,6 +45,19 @@ client.on('error', (err) => {
 
 // Early guard: block commands that have been disabled via /owner disable (persisted in guild-config.json)
 client.on('interactionCreate', async interaction => {
+    // Normalize member permissions object to ensure a `.has` function exists
+    try {
+        if (interaction && interaction.member && interaction.member.permissions && typeof interaction.member.permissions.has !== 'function') {
+            const p = interaction.member.permissions;
+            interaction.member.permissions.has = (perm) => {
+                try {
+                    if (typeof p === 'number' || typeof p === 'bigint') return (BigInt(p) & BigInt(perm)) === BigInt(perm);
+                    if (p && typeof p.bitfield !== 'undefined') return (BigInt(p.bitfield) & BigInt(perm)) === BigInt(perm);
+                } catch (_) {}
+                return false;
+            };
+        }
+    } catch (_) {}
     try {
         if (!interaction.isChatInputCommand()) return;
         // mark bot-owner and, if owner, monkey-patch permission checks so owner can bypass server role requirements
@@ -267,7 +280,7 @@ client.on('interactionCreate', async interaction => {
     const createRoles = !!interaction.options.getBoolean('roles');
     if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const guild = interaction.guild;
     const created = { channels: [], roles: [], categoryId: null };
 
@@ -488,7 +501,7 @@ client.on('interactionCreate', async interaction => {
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Test verwenden.', flags: MessageFlags.Ephemeral });
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             const ok = await sendWelcomeMessageForGuild(interaction.guild).catch(e => false);
             return interaction.editReply({ content: ok ? '✅ Testnachricht gesendet.' : '❌ Konnte keine passende Textnachricht senden (fehlende Berechtigungen?).' });
         }
@@ -502,7 +515,7 @@ client.on('interactionCreate', async interaction => {
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             if (!CLIENT_ID) return interaction.editReply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.' });
             try {
                 await rest.put(Routes.applicationGuildCommands(CLIENT_ID, interaction.guild.id), { body: [] });
@@ -522,7 +535,7 @@ client.on('interactionCreate', async interaction => {
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
             if (!CLIENT_ID) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             try {
                 await registerCommandsForGuild(interaction.guild.id);
                 return interaction.editReply({ content: '✅ Slash-Commands für diese Gilde wurden registriert.' });
@@ -541,12 +554,12 @@ client.on('interactionCreate', async interaction => {
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
             if (!isAdmin && !owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen diesen Befehl verwenden.', flags: MessageFlags.Ephemeral });
             if (!CLIENT_ID) return interaction.reply({ content: 'CLIENT_ID ist nicht konfiguriert auf dem Bot.', flags: MessageFlags.Ephemeral });
-            await interaction.deferReply({ ephemeral: true });
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
             try {
                 const res = await rest.get(Routes.applicationGuildCommands(CLIENT_ID, interaction.guild.id));
                 if (!res || !Array.isArray(res) || res.length === 0) return interaction.editReply({ content: 'Keine guild-scoped Commands registriert.' });
                 const lines = res.map(c => `• ${c.name} (${c.id})`).slice(0, 200);
-                return interaction.editReply({ content: `Registrierte Commands:\n${lines.join('\n')}` });
+                return safeEdit(interaction, `Registrierte Commands:\n${lines.join('\n')}`);
             } catch (e) {
                 console.error('listguildcommands error', e && (e.stack || e));
                 return interaction.editReply({ content: 'Fehler beim Abfragen der registrierten Commands: ' + (e.message || String(e)) });
@@ -629,7 +642,7 @@ client.on('interactionCreate', async interaction => {
     }
     if (!interaction.guild) return interaction.reply({ content: 'Dieser Befehl muss in einem Server verwendet werden.', flags: MessageFlags.Ephemeral });
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     try {
         const cfg = await loadConfig();
         const gcfg = cfg[interaction.guild.id] || {};
@@ -1727,6 +1740,60 @@ async function niceEdit(interaction, payload) {
     }
 }
 
+// Safe utilities for splitting long content and permission checks
+function hasPerm(interaction, perm) {
+    try {
+        if (!interaction || !interaction.member) return false;
+        const p = interaction.member.permissions;
+        if (!p || typeof p.has !== 'function') return false;
+        return !!p.has(perm);
+    } catch (e) {
+        return false;
+    }
+}
+
+async function safeReply(interaction, content, opts = {}) {
+    try {
+        let text = content || '';
+        const max = 1900;
+        if (typeof text !== 'string') text = String(text);
+        if (text.length <= max) {
+            return await interaction.reply({ content: text, flags: opts.ephemeral ? MessageFlags.Ephemeral : undefined });
+        }
+        // split into chunks
+        const chunks = [];
+        for (let i = 0; i < text.length; i += max) chunks.push(text.slice(i, i + max));
+        await interaction.reply({ content: chunks[0], flags: opts.ephemeral ? MessageFlags.Ephemeral : undefined });
+        for (let i = 1; i < chunks.length; i++) {
+            await interaction.followUp({ content: chunks[i], flags: opts.ephemeral ? MessageFlags.Ephemeral : undefined });
+        }
+    } catch (e) {
+        console.error('safeReply error', e);
+        try { return interaction.reply({ content: 'Fehler beim Senden der Nachricht.', flags: MessageFlags.Ephemeral }); } catch(_){}
+    }
+}
+
+async function safeEdit(interaction, content, opts = {}) {
+    try {
+        let text = content || '';
+        const max = 1900;
+        if (typeof text !== 'string') text = String(text);
+        if (text.length <= max) {
+            return await interaction.editReply({ content: text });
+        }
+        const chunks = [];
+        for (let i = 0; i < text.length; i += max) chunks.push(text.slice(i, i + max));
+        // edit first chunk
+        await interaction.editReply({ content: chunks[0] });
+        for (let i = 1; i < chunks.length; i++) {
+            await interaction.followUp({ content: chunks[i] });
+        }
+    } catch (e) {
+        console.error('safeEdit error', e);
+        try { return interaction.editReply('Fehler beim Aktualisieren der Nachricht.'); } catch(_){}
+    }
+}
+
 // Small local DB of programming concepts (German) for quick offline answers
 const localConceptDB = {
     'recursion': 'Recursion ist, wenn sich eine Funktion selbst aufruft. Beispiel (Python):\n\n```python\ndef fib(n):\n    if n <= 1:\n        return n\n    return fib(n-1) + fib(n-2)\n```\n\nDas ist nützlich für Probleme, die sich in kleinere, ähnliche Teilprobleme zerlegen lassen.',
@@ -2426,7 +2493,18 @@ async function sendStartupAnimationToChannel(guildId, channelId) {
         if (!m) return;
         for (let i = 1; i < frames.length; i++) {
             await new Promise(r => setTimeout(r, 650));
-            try { await m.edit({ content: '```' + frames[i] + '```' }); } catch (e) { break; }
+            try {
+                const payload = '```' + frames[i] + '```';
+                if (payload.length > 1900) {
+                    // truncate large frames to avoid Discord 2000-char limit
+                    const short = payload.slice(0, 1896) + '\n... (frame truncated)\n```';
+                    await m.edit({ content: short });
+                } else {
+                    await m.edit({ content: payload });
+                }
+            } catch (e) {
+                break;
+            }
         }
     } catch (e) {
         console.error('startup animation error for', guildId, channelId, e);
@@ -2709,7 +2787,7 @@ client.on('interactionCreate', async interaction => {
     if (commandName === 'reload') {
         const isOwner = await isBotOwner(interaction);
         if (!isOwner) return interaction.reply({ content: 'Nur der Bot-Owner darf das ausführen.', flags: MessageFlags.Ephemeral });
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
             await registerGlobalCommands();
             return interaction.editReply({ content: '✅ Commands neu geladen.' });
@@ -2796,7 +2874,7 @@ client.on('interactionCreate', async interaction => {
         const user = ensureUserEntry(economy, interaction.user.id);
         const inv = user.inventory || {};
         const lines = Object.keys(inv).length === 0 ? ['Dein Inventar ist leer.'] : Object.entries(inv).map(([k, v]) => `${k}: ${v}`);
-        return interaction.reply({ content: `📦 Dein Inventar:\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
+        return safeReply(interaction, `📦 Dein Inventar:\n${lines.join('\n')}`, { ephemeral: true });
     }
 
     if (commandName === 'shop') {
@@ -2804,7 +2882,7 @@ client.on('interactionCreate', async interaction => {
         try { sub = interaction.options.getSubcommand(false) || ''; } catch(_) { sub = ''; }
         if (sub === 'list') {
             const lines = Object.entries(SHOP_ITEMS).map(([key, it]) => `• ${it.name} (${key}) — ${it.cost} Coins — ${it.desc}`);
-            return interaction.reply({ content: `🛒 Shop Items:\n${lines.join('\n')}`, flags: MessageFlags.Ephemeral });
+            return safeReply(interaction, `🛒 Shop Items:\n${lines.join('\n')}`, { ephemeral: true });
         }
         if (sub === 'buy') {
             const itemKey = interaction.options.getString('item');
@@ -2954,7 +3032,7 @@ client.on('interactionCreate', async interaction => {
         // only server admins or owner
         const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
         const isOwner = owners.has(interaction.user.id);
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen den Krampus-Modus setzen.', flags: MessageFlags.Ephemeral });
+        if (!hasPerm(interaction, PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Nur Server-Admins oder der Bot-Owner dürfen den Krampus-Modus setzen.', flags: MessageFlags.Ephemeral });
         if (value === 'an') { gcfg.krampus = gcfg.krampus || {}; gcfg.krampus.enabled = true; await saveConfig(cfg); return interaction.reply({ content: 'Krampus-Modus aktiviert für diesen Server.', flags: MessageFlags.Ephemeral }); }
         if (value === 'aus') { gcfg.krampus = gcfg.krampus || {}; gcfg.krampus.enabled = false; await saveConfig(cfg); return interaction.reply({ content: 'Krampus-Modus deaktiviert für diesen Server.', flags: MessageFlags.Ephemeral }); }
         if (value === 'ultra-on') { gcfg.krampus = gcfg.krampus || {}; gcfg.krampus.ultra = true; await saveConfig(cfg); return interaction.reply({ content: 'Krampus Ultra-Mode aktiviert ✅', flags: MessageFlags.Ephemeral }); }
@@ -3029,7 +3107,7 @@ client.on('interactionCreate', async interaction => {
         await interaction.deferReply();
 
         try {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageEmojisAndStickers)) {
+            if (!hasPerm(interaction, PermissionFlagsBits.ManageEmojisAndStickers)) {
                 return await interaction.editReply('Du brauchst die Berechtigung "Emojis verwalten" für diesen Befehl! ❌');
             }
 
@@ -3051,7 +3129,7 @@ client.on('interactionCreate', async interaction => {
     // Set welcome channel
     if (commandName === 'set-welcome') {
         const channel = interaction.options.getChannel('channel');
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+        if (!hasPerm(interaction, PermissionFlagsBits.ManageGuild)) {
                 return await interaction.reply({ content: 'Du brauchst die Berechtigung "Server verwalten".', flags: MessageFlags.Ephemeral });
         }
 
@@ -3081,7 +3159,7 @@ client.on('interactionCreate', async interaction => {
     // Set autorole
     if (commandName === 'set-autorole') {
         const role = interaction.options.getRole('role');
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+                if (!hasPerm(interaction, PermissionFlagsBits.ManageRoles)) {
             return await interaction.reply({ content: 'Du brauchst die Berechtigung "Rollen verwalten".', flags: MessageFlags.Ephemeral });
         }
         const cfg = await loadConfig();
@@ -3196,7 +3274,7 @@ client.on('interactionCreate', async interaction => {
         };
         const removedMsg = (rname, usertag) => isGerman ? `✅ Rolle **${rname}** von ${usertag} entfernt.` : `✅ Role **${rname}** removed from ${usertag}.`;
 
-        if (!interaction.member || !interaction.member.permissions || !interaction.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        if (!interaction.member || !interaction.member.permissions || !hasPerm(interaction, PermissionFlagsBits.ManageRoles)) {
             // allow bot owner as well
             const cfg = await loadConfig();
             const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
@@ -3338,7 +3416,7 @@ client.on('interactionCreate', async interaction => {
 
     if (commandName === 'purge') {
         const amount = interaction.options.getInteger('amount');
-        if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) return interaction.reply({ content: 'Du brauchst Manage Messages.', flags: MessageFlags.Ephemeral });
+        if (!hasPerm(interaction, PermissionFlagsBits.ManageMessages)) return interaction.reply({ content: 'Du brauchst Manage Messages.', flags: MessageFlags.Ephemeral });
         if (amount < 1 || amount > 100) return interaction.reply({ content: 'Anzahl zwischen 1 und 100.', flags: MessageFlags.Ephemeral });
         try {
             const deleted = await interaction.channel.bulkDelete(amount, true);
@@ -3371,7 +3449,7 @@ client.on('interactionCreate', async interaction => {
 
     try {
         if (cmd === 'mod') {
-            if (!interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Nur Admins oder Owner dürfen Moderationsbefehle verwenden.', flags: MessageFlags.Ephemeral });
+            if (!hasPerm(interaction, PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Nur Admins oder Owner dürfen Moderationsbefehle verwenden.', flags: MessageFlags.Ephemeral });
             const action = interaction.options.getString('action');
             const user = interaction.options.getUser('user');
             const reason = interaction.options.getString('reason') || 'Kein Grund angegeben';
@@ -3438,7 +3516,7 @@ client.on('interactionCreate', async interaction => {
                 if (process.env.OWNER_ID) lines.push(`Env OWNER_ID: ${process.env.OWNER_ID}`);
                 if (cfg.ownerId) lines.push(`Config ownerId: ${cfg.ownerId}`);
                 if (cfg.owners && cfg.owners.length) lines.push(`Owners: ${cfg.owners.join(', ')}`);
-                return interaction.reply({ content: lines.join('\n') || 'Keine Owner konfiguriert', flags: MessageFlags.Ephemeral });
+                return safeReply(interaction, lines.join('\n') || 'Keine Owner konfiguriert', { ephemeral: true });
             }
             if (sub === 'disable') {
                 const raw = (interaction.options.getString('cmd') || '');
@@ -3513,7 +3591,7 @@ client.on('interactionCreate', async interaction => {
         if (cmd === 'team') {
             // allow owners and existing team members to manage team
             const sub = interaction.options.getString('sub');
-            if (!isOwner && !team.has(interaction.user.id) && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Nur Owner, Team-Mitglieder oder Server-Admins dürfen diese Befehle verwenden.', flags: MessageFlags.Ephemeral });
+            if (!isOwner && !team.has(interaction.user.id) && !hasPerm(interaction, PermissionFlagsBits.ManageGuild)) return interaction.reply({ content: 'Nur Owner, Team-Mitglieder oder Server-Admins dürfen diese Befehle verwenden.', flags: MessageFlags.Ephemeral });
             if (sub === 'add') {
                 const user = interaction.options.getUser('user');
                 if (!user) return interaction.reply({ content: 'Bitte gib einen User an.', flags: MessageFlags.Ephemeral });
@@ -3535,7 +3613,7 @@ client.on('interactionCreate', async interaction => {
             if (sub === 'list') {
                 cfg._global = cfg._global || {};
                 const list = cfg._global.team || [];
-                return interaction.reply({ content: list.length ? `Team: ${list.join(', ')}` : 'Kein Team konfiguriert', flags: MessageFlags.Ephemeral });
+                return safeReply(interaction, list.length ? `Team: ${list.join(', ')}` : 'Kein Team konfiguriert', { ephemeral: true });
             }
             if (sub === 'only') {
                 const val = interaction.options.getString('value');
@@ -3576,7 +3654,7 @@ client.on('interactionCreate', async interaction => {
     const entCmds = ['hack','bruteforce','phish','virus','exploit','bitcoin'];
     if (entCmds.includes(cmd)) {
         if (!entGlobal && !isOwner) return interaction.reply({ content: 'Entertainment-Commands sind global deaktiviert.', flags: MessageFlags.Ephemeral });
-        if (!entGuild && !interaction.member.permissions.has(PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Entertainment-Commands sind für diesen Server deaktiviert.', flags: MessageFlags.Ephemeral });
+        if (!entGuild && !hasPerm(interaction, PermissionFlagsBits.ManageGuild) && !isOwner) return interaction.reply({ content: 'Entertainment-Commands sind für diesen Server deaktiviert.', flags: MessageFlags.Ephemeral });
         const cd = isOnCooldown(interaction.guild?.id, interaction.user.id, cmd, 10);
         if (cd > 0) return interaction.reply({ content: `Bitte warte noch ${cd}s bevor du "/${cmd}" erneut benutzt.`, flags: MessageFlags.Ephemeral });
     }
@@ -4659,7 +4737,7 @@ client.on('interactionCreate', async interaction => {
                 await saveConfig(cfg);
                 parts.push(`\n✅ Globaler Watch gespeichert.`);
             } else {
-                if (interaction.member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+                if (hasPerm(interaction, PermissionFlagsBits.ManageGuild)) {
                     cfg[interaction.guild.id] = cfg[interaction.guild.id] || {};
                     cfg[interaction.guild.id].watches = cfg[interaction.guild.id].watches || [];
                     cfg[interaction.guild.id].watches.push({ service, username, channelId: ch.id, createdBy: interaction.user.id, createdAt: Date.now() });
@@ -4667,7 +4745,7 @@ client.on('interactionCreate', async interaction => {
                     parts.push(`\n✅ Watch gespeichert → ${ch}`);
                 }
             }
-            return interaction.editReply(parts.join('\n'));
+            return safeEdit(interaction, parts.join('\n'));
         }
 
         // handle TikTok / Instagram - requires third-party API/provider key
@@ -4821,7 +4899,7 @@ client.on('guildMemberAdd', async member => {
         const owners = new Set(); if (process.env.OWNER_ID) owners.add(process.env.OWNER_ID); if (cfg.ownerId) owners.add(cfg.ownerId); if (Array.isArray(cfg.owners)) cfg.owners.forEach(o=>owners.add(o)); if (cfg._global && Array.isArray(cfg._global.owners)) cfg._global.owners.forEach(o=>owners.add(o));
         if (!owners.has(interaction.user.id)) return interaction.reply({ content: 'Nur der Bot-Owner kann diese Information abrufen.', flags: MessageFlags.Ephemeral });
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
         try {
             const fetched = await client.guilds.fetch();
             const lines = [];
@@ -4848,7 +4926,7 @@ client.on('guildMemberAdd', async member => {
                 const buf = Buffer.from(out, 'utf8');
                 await interaction.editReply({ content: 'Die Liste ist zu lang — siehe Anhang.', files: [{ attachment: buf, name: 'guilds.txt' }] });
             } else {
-                await interaction.editReply({ content: 'Gildenliste:\n' + out });
+                await safeEdit(interaction, 'Gildenliste:\n' + out);
             }
         } catch (e) {
             console.error('list-guilds error', e);
